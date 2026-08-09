@@ -11,3 +11,12 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "sqlite-vec>=0.1.9",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = ["*/migrations/*"]
+
+[tool.ruff.lint]
+# E/F pycodestyle+pyflakes, I import sorting, UP pyupgrade, B bugbear.
+select = ["E", "F", "I", "UP", "B"]
