@@ -1,0 +1,93 @@
+# Airline Reservation System
+
+Python-based web application airline reservation system that enables users to reserve a seat on a flight.
+
+## Core Requirements
+1. Implement a way to print a flight/airplane that displays available seating on the plane.
+2. Implement a way to assign the first available seat.
+3. Implement a way to assign a seat for a specific passenger (e.g., "1A").
+
+## Tech Stack
+Backend - Django
+Database - SQLite
+Frontend - HTMX and TailwindCSS
+
+## Getting Started
+
+### 1. Install Python dependencies
+
+```bash
+uv sync
+```
+
+### 2. Install the Tailwind CLI
+
+Tailwind runs as a standalone binary, so no Node.js or `package.json` is needed.
+The binary is gitignored, so each clone downloads its own copy:
+
+```bash
+mkdir -p bin
+curl -sSL -o bin/tailwindcss \
+  https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.3/tailwindcss-linux-x64
+chmod +x bin/tailwindcss
+```
+
+On macOS, swap `tailwindcss-linux-x64` for `tailwindcss-macos-arm64` (Apple Silicon)
+or `tailwindcss-macos-x64` (Intel).
+
+### 3. Run migrations
+
+```bash
+uv run ars/manage.py migrate
+```
+
+### 4. Start the server
+
+```bash
+uv run ars/manage.py runserver
+```
+
+The app is served at http://127.0.0.1:8000/. Note there is no route for `/` yet —
+the htmx/Tailwind smoke-test page lives at http://127.0.0.1:8000/htmx-demo/.
+
+## Frontend Workflow
+
+Tailwind compiles `ars/static/src/input.css` into `ars/static/css/tailwind.css`,
+scanning `ars/templates/` for the utility classes you use. Rebuild after editing
+templates, or leave a watcher running in a second terminal:
+
+```bash
+# one-off build
+./bin/tailwindcss -i ars/static/src/input.css -o ars/static/css/tailwind.css --minify
+
+# rebuild on save
+./bin/tailwindcss -i ars/static/src/input.css -o ars/static/css/tailwind.css --watch
+```
+
+The compiled `tailwind.css` **is** committed, so the app renders correctly for
+anyone who hasn't installed the Tailwind binary.
+
+htmx is served locally from the `django-htmx` package (no CDN). `templates/base.html`
+loads it via `{% htmx_script %}` and attaches the CSRF token to every htmx request
+through `hx-headers` on `<body>`, so `hx-post` works without a per-form `{% csrf_token %}`.
+
+## Project Layout
+
+```
+ars/
+├── ars/                 # Django project package (settings, urls, views)
+├── templates/           # Project-level templates (base.html, demo.html)
+├── static/
+│   ├── src/input.css    # Tailwind source
+│   └── css/tailwind.css # compiled output (committed)
+└── manage.py
+```
+
+## Notes
+
+- `ALLOWED_HOSTS` permits `192.168.254.100` alongside `localhost` and `127.0.0.1`,
+  so the app is reachable both over the LAN and locally.
+- `DEBUG = True` and the checked-in `SECRET_KEY` are development-only settings.
+  Both must change before any real deployment.
+- `htmx-demo/` and `ars/ars/views.py` are throwaway scaffolding to prove the
+  frontend stack works. Delete them once real views exist.
