@@ -7,5 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "django>=6.1",
     "django-htmx>=1.29",
+    "ollama>=0.6.2",
     "python-dotenv>=1.2.2",
+    "sqlite-vec>=0.1.9",
 ]
