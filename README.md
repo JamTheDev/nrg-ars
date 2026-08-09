@@ -20,7 +20,20 @@ Frontend - HTMX and TailwindCSS
 uv sync
 ```
 
-### 2. Install the Tailwind CLI
+### 2. Create your .env file
+
+`SECRET_KEY` is read from the environment, so the app will refuse to start
+without it:
+
+```bash
+cp .env.example .env
+uv run python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+```
+
+Paste the generated value into `.env`, keeping the single quotes so characters
+like `$` and `!` are read literally. `.env` is gitignored and must stay that way.
+
+### 3. Install the Tailwind CLI
 
 Tailwind runs as a standalone binary, so no Node.js or `package.json` is needed.
 The binary is gitignored, so each clone downloads its own copy:
@@ -35,13 +48,13 @@ chmod +x bin/tailwindcss
 On macOS, swap `tailwindcss-linux-x64` for `tailwindcss-macos-arm64` (Apple Silicon)
 or `tailwindcss-macos-x64` (Intel).
 
-### 3. Run migrations
+### 4. Run migrations
 
 ```bash
 uv run ars/manage.py migrate
 ```
 
-### 4. Start the server
+### 5. Start the server
 
 ```bash
 uv run ars/manage.py runserver
@@ -87,7 +100,8 @@ ars/
 
 - `ALLOWED_HOSTS` permits `192.168.254.100` alongside `localhost` and `127.0.0.1`,
   so the app is reachable both over the LAN and locally.
-- `DEBUG = True` and the checked-in `SECRET_KEY` are development-only settings.
-  Both must change before any real deployment.
+- `SECRET_KEY` is loaded from `.env` via python-dotenv and is never committed.
+- `DEBUG = True` is a development-only setting and must change before any real
+  deployment.
 - `htmx-demo/` and `ars/ars/views.py` are throwaway scaffolding to prove the
   frontend stack works. Delete them once real views exist.

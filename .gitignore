@@ -12,6 +12,9 @@ wheels/
 # Tailwind standalone CLI binary (~107 MB, see README for the download command)
 /bin/
 
+# Environment / secrets
+.env
+
 # Django
 db.sqlite3
 db.sqlite3-journal
