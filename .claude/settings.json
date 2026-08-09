@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/block_protected_push.py\"",
+            "timeout": 15,
+            "statusMessage": "Checking branch protection..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/check_python.py\"",
+            "timeout": 90,
+            "statusMessage": "Running ruff..."
+          }
+        ]
+      }
+    ]
+  }
+}
