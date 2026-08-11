@@ -595,8 +595,9 @@ CLI (see README).
 - **A party is all-or-nothing.** If any seat in a multi-seat request was just
   taken, the whole booking rolls back rather than partially succeeding —
   serving two of three passengers and charging for it is worse than refusing.
-- **No `print_flight` command yet** — core requirement 1's literal "print"
-  (§2) is still unimplemented; the web seat map covers the display half.
+- ~~**No `print_flight` command yet**~~ — resolved: `print_flight` renders the
+  same `Cabin` as text, sharing the availability query with the web view.
+  `--available-only` lists free designations for piping.
 - **Party size and selection are one value.** The stepper displays the number of
   selected seats; raising it asks the server for another seat beside the party,
   lowering it drops the newest pick in the page.
