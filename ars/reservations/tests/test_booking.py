@@ -13,6 +13,7 @@ from reservations.exceptions import (
     InvalidPassengerError,
     InvalidSeatError,
     NothingSelectedError,
+    PartyTooLargeError,
     SeatNotFoundError,
     SeatTakenError,
 )
@@ -120,6 +121,22 @@ class BookSeatsTests(TestCase):
     def test_an_empty_request_is_refused(self) -> None:
         with self.assertRaises(NothingSelectedError):
             services.book_seats(self.flight, [])
+
+    def test_a_party_beyond_the_cap_is_refused_server_side(self) -> None:
+        # The UI caps this twice over, but the cap is a rule about bookings.
+        with self.assertRaises(PartyTooLargeError):
+            services.book_seats(
+                self.flight, [seat_request(f'1{c}', f'P{c}') for c in 'ABCDEF']
+                + [seat_request('2A', 'Extra')]
+            )
+
+        self.assertEqual(Booking.objects.count(), 0)
+
+    def test_exactly_the_cap_is_allowed(self) -> None:
+        bookings = services.book_seats(
+            self.flight, [seat_request(f'1{c}', f'P{c}') for c in 'ABCDEF']
+        )
+        self.assertEqual(len(bookings), 6)
 
 
 class AssignFirstAvailableTests(TestCase):
