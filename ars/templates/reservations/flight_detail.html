@@ -50,7 +50,10 @@
         {% include "reservations/_seat_map.html" %}
       </div>
 
-      <div class="absolute right-5 top-5 flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div
+        id="map-controls"
+        class="absolute right-5 top-5 flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
+      >
         <button type="button" data-zoom="in" class="h-10 w-10 text-lg text-slate-600 transition hover:bg-slate-100" aria-label="Zoom in">+</button>
         <button type="button" data-zoom="out" class="h-10 w-10 border-y border-slate-200 text-lg text-slate-600 transition hover:bg-slate-100" aria-label="Zoom out">&minus;</button>
         <button type="button" data-zoom="fit" class="h-10 w-10 text-sm text-slate-600 transition hover:bg-slate-100" aria-label="Fit to screen">&#9634;</button>

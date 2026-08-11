@@ -22,6 +22,7 @@
   var totalOutput = document.getElementById('reserve-total');
   var emptyNote = document.getElementById('reserve-empty');
   var barWrap = document.getElementById('reserve-bar-wrap');
+  var mapControls = document.getElementById('map-controls');
 
   var fare = parseFloat(panel.dataset.fare) || 0;
   var currency = panel.dataset.currency || '';
@@ -37,16 +38,20 @@
     return currency + amount.toFixed(2).replace(/\.00$/, '');
   }
 
+  /* The bar and the zoom controls both sit where the panel opens, so they move
+   * out of its way rather than disappearing behind it. */
   function openPanel() {
     panel.dataset.open = 'true';
     panel.setAttribute('aria-hidden', 'false');
     if (barWrap) barWrap.dataset.panelOpen = 'true';
+    if (mapControls) mapControls.dataset.panelOpen = 'true';
   }
 
   function closePanel() {
     panel.dataset.open = 'false';
     panel.setAttribute('aria-hidden', 'true');
     if (barWrap) delete barWrap.dataset.panelOpen;
+    if (mapControls) delete mapControls.dataset.panelOpen;
   }
 
   function deselect(designation) {
@@ -263,10 +268,20 @@
    * project has already shipped once. */
   function flashLimit() {
     if (!limitNote) return;
+
     limitNote.hidden = false;
+    // Force a reflow between display and the transition. Without a resolved
+    // starting style there is nothing to transition from and the note simply
+    // appears -- a requestAnimationFrame alone is not reliably enough.
+    void limitNote.offsetWidth;
+    limitNote.dataset.visible = 'true';
+
     clearTimeout(limitTimer);
     limitTimer = setTimeout(function () {
-      limitNote.hidden = true;
+      limitNote.dataset.visible = 'false';
+      limitTimer = setTimeout(function () {
+        limitNote.hidden = true;
+      }, 200);
     }, 2500);
   }
 
