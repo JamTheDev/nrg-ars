@@ -65,7 +65,17 @@ uv run ars/manage.py seed_flights
 Idempotent on flight number — re-running it never duplicates a flight. Flights
 can also be added through the admin.
 
-### 6. Start the server
+### 6. Print a flight (core requirement 1)
+
+The cabin renders as text as well as on screen, from the same availability
+query, so the two cannot disagree:
+
+```bash
+uv run ars/manage.py print_flight PR101
+uv run ars/manage.py print_flight PR101 --available-only | wc -l
+```
+
+### 7. Start the server
 
 ```bash
 uv run ars/manage.py runserver
