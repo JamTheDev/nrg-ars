@@ -17,7 +17,13 @@ than a pull request description.
 | [Seat map and kiosk camera](03-seat-map-kiosk-camera.md) | as-built | `e113ffd` + `4b4002a`, PRs #3 and #4 |
 | [Seat selection and reservation panel](04-seat-selection-panel.md) | as-built | `e113ffd`, PR #3 |
 | [Booking flow](05-booking-flow.md) | as-built | `aed1ca1`, PR #4 |
-| [Party-size auto selection](06-party-size-auto-select.md) | **proposed** | — |
+| [Party-size auto selection](06-party-size-auto-select.md) | built | `502604f`–`a8043ef`, PR #8 |
+| [`print_flight`, the literal print](07-print-flight.md) | **proposed** | — |
+| [Natural-language seat search](08-natural-language-search.md) | **proposed** | — |
+
+Together, 07 and 08 are what stands between this project and feature complete:
+07 closes the half of core requirement 1 that the web seat map does not cover,
+and 08 builds the feature ARCHITECTURE.md §7 designs but nothing implements.
 
 ARCHITECTURE.md remains the reference for how the system works today. These
 documents explain *why it is that way*, including the options that were rejected.
