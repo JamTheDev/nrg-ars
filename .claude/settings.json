@@ -9,6 +9,12 @@
             "command": "/usr/bin/env python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/block_protected_push.py\"",
             "timeout": 15,
             "statusMessage": "Checking branch protection..."
+          },
+          {
+            "type": "command",
+            "command": "/usr/bin/env python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/block_ai_attribution.py\"",
+            "timeout": 15,
+            "statusMessage": "Checking for AI attribution..."
           }
         ]
       }
