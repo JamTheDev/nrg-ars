@@ -1,0 +1,6 @@
+{% comment %}
+  What every booking POST returns: the refreshed cabin (swapped into
+  #seat-map) plus the status banner (swapped out of band into #booking-status).
+{% endcomment %}
+{% include "reservations/_seat_map.html" %}
+{% include "reservations/_booking_result.html" %}

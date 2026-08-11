@@ -1,0 +1,22 @@
+{% comment %}
+  Status banner, delivered as an out-of-band swap so it can land while the
+  response body replaces the seat map.
+{% endcomment %}
+<div
+  id="booking-status"
+  hx-swap-oob="true"
+  data-status="{% if status_ok %}ok{% else %}error{% endif %}"
+  class="pointer-events-none fixed inset-x-0 top-24 z-40 flex justify-center px-4"
+>
+  {% if status_message %}
+    <p
+      role="status"
+      class="pointer-events-auto rounded-full px-5 py-2.5 text-sm font-medium shadow-lg
+             {% if status_ok %}
+               bg-emerald-600 text-white
+             {% else %}
+               bg-rose-600 text-white
+             {% endif %}"
+    >{{ status_message }}</p>
+  {% endif %}
+</div>

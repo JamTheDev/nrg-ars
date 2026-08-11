@@ -93,6 +93,13 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        # WAL lets the seat map be read while a booking is being written, and
+        # the busy timeout absorbs brief write contention instead of failing
+        # instantly. See ARCHITECTURE.md section 5.
+        'OPTIONS': {
+            'init_command': 'PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;',
+            'timeout': 20,
+        },
     }
 }
 
