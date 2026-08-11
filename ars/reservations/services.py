@@ -20,6 +20,7 @@ from reservations.exceptions import (
     InvalidPassengerError,
     InvalidSeatError,
     NothingSelectedError,
+    PartyTooLargeError,
     SeatNotFoundError,
     SeatTakenError,
 )
@@ -83,6 +84,10 @@ def book_seats(flight: Flight, requests: list[SeatRequest]) -> list[Booking]:
     """
     if not requests:
         raise NothingSelectedError()
+    # The UI caps the party at both the stepper and the seat map, but the cap
+    # is a rule about bookings, not about widgets.
+    if len(requests) > settings.MAX_PARTY_SIZE:
+        raise PartyTooLargeError(len(requests), settings.MAX_PARTY_SIZE)
 
     bookings = []
     with transaction.atomic():

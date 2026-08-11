@@ -23,6 +23,12 @@
   var DRAG_SLOP = 14;
   var FRICTION = 0.92;
   var MIN_VELOCITY = 0.05;
+  var FOCUS_MS = 450; // long enough to read as movement, short enough to wait out
+  var FOCUS_MAX_SCALE = 1.25; // comfortable reading zoom; do not shove seats in a face
+  var FOCUS_FILL = 0.55; // fraction of the viewport the party should occupy
+
+  var reduceMotion =
+    window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   var scale = 1;
   var tx = 0;
@@ -36,6 +42,7 @@
   var downTarget = null; // what the gesture started on, for tap dispatch
   var velocity = { x: 0, y: 0 };
   var glide = null;
+  var flight = null; // in-progress camera move
 
   function contentSize() {
     return { width: canvas.offsetWidth * scale, height: canvas.offsetHeight * scale };
@@ -59,34 +66,51 @@
     canvas.style.transform = 'translate(' + tx + 'px, ' + ty + 'px) scale(' + scale + ')';
   }
 
-  function zoomAt(clientX, clientY, factor) {
+  /* Where a zoom about a screen point lands, without applying it. Holding that
+   * point still is what keeps the cabin from sliding away under the fingers. */
+  function zoomTarget(clientX, clientY, factor) {
     var next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * factor));
-    if (next === scale) return;
-
     var rect = viewport.getBoundingClientRect();
     var px = clientX - rect.left;
     var py = clientY - rect.top;
     var ratio = next / scale;
 
-    // Hold the point under the cursor/fingers still while the scale changes.
-    tx = px - ratio * (px - tx);
-    ty = py - ratio * (py - ty);
-    scale = next;
+    return { scale: next, tx: px - ratio * (px - tx), ty: py - ratio * (py - ty) };
+  }
+
+  /* Continuous gestures -- wheel and pinch -- are already the passenger's own
+   * movement, so they apply instantly. Animating them would lag the fingers. */
+  function zoomAt(clientX, clientY, factor) {
+    var to = zoomTarget(clientX, clientY, factor);
+    if (to.scale === scale) return;
+
+    stopFlight();
+    scale = to.scale;
+    tx = to.tx;
+    ty = to.ty;
     render();
+  }
+
+  /* Discrete zooms -- buttons, double-tap -- are a request to be somewhere
+   * else, so they travel there. */
+  function zoomStep(clientX, clientY, factor) {
+    var to = zoomTarget(clientX, clientY, factor);
+    if (to.scale === scale) return;
+    flyTo(to.scale, to.tx, to.ty, 260);
   }
 
   function zoomCentre(factor) {
     var rect = viewport.getBoundingClientRect();
-    zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
+    zoomStep(rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
   }
 
-  function fit() {
+  function fitTarget() {
     var width = canvas.offsetWidth;
     var height = canvas.offsetHeight;
-    if (!width || !height) return;
+    if (!width || !height) return null;
 
     var padding = 32;
-    scale = Math.min(
+    var next = Math.min(
       MAX_SCALE,
       Math.max(
         MIN_SCALE,
@@ -96,8 +120,25 @@
         )
       )
     );
-    tx = (viewport.clientWidth - width * scale) / 2;
-    ty = (viewport.clientHeight - height * scale) / 2;
+    return {
+      scale: next,
+      tx: (viewport.clientWidth - width * next) / 2,
+      ty: (viewport.clientHeight - height * next) / 2,
+    };
+  }
+
+  function fit(animated) {
+    var to = fitTarget();
+    if (!to) return;
+
+    if (animated) {
+      flyTo(to.scale, to.tx, to.ty, 320);
+      return;
+    }
+    stopFlight();
+    scale = to.scale;
+    tx = to.tx;
+    ty = to.ty;
     render();
   }
 
@@ -118,6 +159,51 @@
     }
   }
 
+  function stopFlight() {
+    if (flight) {
+      cancelAnimationFrame(flight);
+      flight = null;
+    }
+  }
+
+  /* Move the camera to a given scale and offset over FOCUS_MS.
+   *
+   * Cutting from one view to another leaves the passenger to work out that the
+   * cabin moved at all; travelling there shows them where it went. Eased out,
+   * so it leaves quickly and settles gently. */
+  function flyTo(targetScale, targetTx, targetTy, duration) {
+    var ms = duration || FOCUS_MS;
+    stopGlide();
+    stopFlight();
+
+    if (reduceMotion) {
+      scale = targetScale;
+      tx = targetTx;
+      ty = targetTy;
+      render();
+      return;
+    }
+
+    var fromScale = scale;
+    var fromX = tx;
+    var fromY = ty;
+    var started = null;
+
+    var step = function (now) {
+      if (started === null) started = now;
+      var progress = Math.min(1, (now - started) / ms);
+      var eased = 1 - Math.pow(1 - progress, 3);
+
+      scale = fromScale + (targetScale - fromScale) * eased;
+      tx = fromX + (targetTx - fromX) * eased;
+      ty = fromY + (targetTy - fromY) * eased;
+      render();
+
+      flight = progress < 1 ? requestAnimationFrame(step) : null;
+    };
+    flight = requestAnimationFrame(step);
+  }
+
   function startGlide() {
     if (Math.hypot(velocity.x, velocity.y) < MIN_VELOCITY * 10) return;
 
@@ -134,7 +220,20 @@
   }
 
   viewport.addEventListener('pointerdown', function (event) {
+    /* The zoom controls sit inside the viewport. Capturing the pointer would
+     * retarget their click to the viewport and leave the buttons dead -- the
+     * same trap the seats fell into. Leave a press on them entirely alone.
+     *
+     * `moved` is reset too: a stale value from an earlier pan would make the
+     * click suppressor below swallow the button's click. */
+    if (event.target.closest('#map-controls')) {
+      moved = 0;
+      downTarget = null;
+      return;
+    }
+
     stopGlide();
+    stopFlight();
     pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     try {
       viewport.setPointerCapture(event.pointerId);
@@ -227,11 +326,53 @@
     { passive: false }
   );
 
+  /* Bring a set of seats into view. Auto-picking seats the passenger cannot
+   * see is indistinguishable from auto-picking nothing.
+   *
+   * The seats' rectangles are already in screen coordinates under the current
+   * transform, so the camera moves by the difference between their centre and
+   * the viewport's -- no unpicking of the transform required. */
+  viewport.addEventListener('seatmap:focus', function (event) {
+    var targets = (event.detail && event.detail.targets) || [];
+    if (!targets.length) return;
+
+    var rects = targets.map(function (el) {
+      return el.getBoundingClientRect();
+    });
+    var view = viewport.getBoundingClientRect();
+
+    // Screen coordinates back into content coordinates, so the target can be
+    // worked out without touching the live transform first.
+    var left = Math.min.apply(null, rects.map(function (r) { return r.left; }));
+    var right = Math.max.apply(null, rects.map(function (r) { return r.right; }));
+    var top = Math.min.apply(null, rects.map(function (r) { return r.top; }));
+    var bottom = Math.max.apply(null, rects.map(function (r) { return r.bottom; }));
+
+    var x1 = (left - view.left - tx) / scale;
+    var x2 = (right - view.left - tx) / scale;
+    var y1 = (top - view.top - ty) / scale;
+    var y2 = (bottom - view.top - ty) / scale;
+
+    // Zoom so the party fills a comfortable share of the viewport -- in for a
+    // couple of seats, out for a party spread over several rows.
+    var fit = Math.min(
+      (view.width * FOCUS_FILL) / (x2 - x1),
+      (view.height * FOCUS_FILL) / (y2 - y1)
+    );
+    var targetScale = Math.min(FOCUS_MAX_SCALE, Math.max(MIN_SCALE, fit));
+
+    flyTo(
+      targetScale,
+      view.width / 2 - ((x1 + x2) / 2) * targetScale,
+      view.height / 2 - ((y1 + y2) / 2) * targetScale
+    );
+  });
+
   viewport.addEventListener('dblclick', function (event) {
     // Double-tapping a seat is someone picking a seat emphatically, not asking
     // to zoom. Only empty cabin space zooms.
     if (event.target.closest('.seat')) return;
-    zoomAt(event.clientX, event.clientY, 1.6);
+    zoomStep(event.clientX, event.clientY, 1.6);
   });
 
   /* A drag that ends over a seat must not read as a tap on that seat. */
@@ -251,10 +392,12 @@
       var action = button.dataset.zoom;
       if (action === 'in') zoomCentre(1.3);
       else if (action === 'out') zoomCentre(1 / 1.3);
-      else fit();
+      else fit(true);
     });
   });
 
-  window.addEventListener('resize', fit);
-  fit();
+  window.addEventListener('resize', function () {
+    fit(false); // a resize is not a journey
+  });
+  fit(false);
 })();
