@@ -1,0 +1,44 @@
+{% comment %}
+  The cabin, top-down. Returned on its own by booking POSTs later, so it must
+  render identically inside the full page and as a fragment -- which is why the
+  pan/zoom transform lives on the canvas *outside* this element.
+{% endcomment %}
+<div id="seat-map" class="relative w-[880px] pb-16 pt-8">
+
+  {# Wings and tailplane, drawn behind the fuselage. #}
+  <div class="pointer-events-none absolute left-1/2 top-[30%] h-64 w-[840px] -translate-x-1/2 rounded-[45%] border-2 border-slate-300 bg-slate-200"></div>
+  <div class="pointer-events-none absolute bottom-16 left-1/2 h-36 w-[520px] -translate-x-1/2 rounded-[45%] border-2 border-slate-300 bg-slate-200"></div>
+
+  {# Fuselage. #}
+  <div class="relative mx-auto w-fit rounded-t-[240px] rounded-b-[140px] border-2 border-slate-300 bg-white px-5 pb-32 pt-36 shadow-sm">
+
+    <p class="absolute inset-x-0 top-16 text-center text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+      Front
+    </p>
+
+    <div class="mb-2 flex items-center gap-2 font-mono text-xs font-semibold text-slate-400">
+      <span class="w-7"></span>
+      {% for letter in cabin.columns_left %}<span class="w-11 shrink-0 text-center">{{ letter }}</span>{% endfor %}
+      <span class="w-10 shrink-0 text-center">&middot;</span>
+      {% for letter in cabin.columns_right %}<span class="w-11 shrink-0 text-center">{{ letter }}</span>{% endfor %}
+      <span class="w-7"></span>
+    </div>
+
+    <div class="flex flex-col gap-2">
+      {% for row in cabin.rows %}
+        <div class="flex items-center gap-2">
+          <span class="w-7 shrink-0 text-right font-mono text-xs text-slate-400">{{ row.number }}</span>
+          {% for cell in row.left %}{% include "reservations/_seat.html" %}{% endfor %}
+          {# The aisle is a rendering concern, not a database one. #}
+          <span class="w-10 shrink-0"></span>
+          {% for cell in row.right %}{% include "reservations/_seat.html" %}{% endfor %}
+          <span class="w-7 shrink-0 font-mono text-xs text-slate-400">{{ row.number }}</span>
+        </div>
+      {% endfor %}
+    </div>
+
+    <p class="absolute inset-x-0 bottom-16 text-center text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+      Rear
+    </p>
+  </div>
+</div>

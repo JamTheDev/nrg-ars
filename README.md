@@ -54,14 +54,29 @@ or `tailwindcss-macos-x64` (Intel).
 uv run ars/manage.py migrate
 ```
 
-### 5. Start the server
+### 5. Seed some flights (optional)
+
+The departures screen reads real rows, so an empty database shows an empty list:
+
+```bash
+uv run ars/manage.py seed_flights
+```
+
+Idempotent on flight number — re-running it never duplicates a flight. Flights
+can also be added through the admin.
+
+### 6. Start the server
 
 ```bash
 uv run ars/manage.py runserver
 ```
 
-The app is served at http://127.0.0.1:8000/. Note there is no route for `/` yet —
-the htmx/Tailwind smoke-test page lives at http://127.0.0.1:8000/htmx-demo/.
+The flight list is served at http://127.0.0.1:8000/, and each flight opens a
+drag/pinch/scroll seat map at `/flights/<id>/`. The htmx/Tailwind smoke-test page
+still lives at http://127.0.0.1:8000/htmx-demo/.
+
+If you run with `--noreload`, note that Django's cached template loader will not
+pick up template edits until you restart the server.
 
 ## Frontend Workflow
 
@@ -89,10 +104,14 @@ through `hx-headers` on `<body>`, so `hx-post` works without a per-form `{% csrf
 ```
 ars/
 ├── ars/                 # Django project package (settings, urls, views)
+├── reservations/        # core booking domain (models, selectors, views)
+├── assistant/           # natural-language seat search
 ├── templates/           # Project-level templates (base.html, demo.html)
+│   └── reservations/    # flight_list.html, flight_detail.html, _seat_map.html
 ├── static/
 │   ├── src/input.css    # Tailwind source
-│   └── css/tailwind.css # compiled output (committed)
+│   ├── css/tailwind.css # compiled output (committed)
+│   └── js/              # seatmap.js (pan/zoom), seat-selection.js (panel)
 └── manage.py
 ```
 

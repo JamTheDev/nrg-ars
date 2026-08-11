@@ -11,5 +11,6 @@
 <body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
   {% block content %}{% endblock %}
   {% django_htmx_script %}
+  {% block scripts %}{% endblock %}
 </body>
 </html>

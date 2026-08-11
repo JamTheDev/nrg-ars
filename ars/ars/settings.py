@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
+from decimal import Decimal
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -51,6 +52,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django_htmx',
     'assistant',
+    'reservations',
 ]
 
 MIDDLEWARE = [
@@ -132,6 +134,24 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 STATICFILES_DIRS = [BASE_DIR / 'static']
+
+
+# Cabin layout
+# Read once by the data migration that seeds the Seat catalog, never at request
+# time -- the seeded rows are the source of truth. See ARCHITECTURE.md section 1.
+
+CABIN_ROWS = 30
+
+CABIN_COLUMNS = 'ABCDEF'
+
+
+# Fares
+# Placeholder flat pricing so the reservation panel can show a total. A real
+# per-flight fare belongs on Flight once booking is implemented.
+
+SEAT_FARE = Decimal('50.00')
+
+CURRENCY_SYMBOL = '$'
 
 
 # Email
