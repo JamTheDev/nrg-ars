@@ -40,6 +40,14 @@ class BookSeatViewTests(TestCase):
         # The booked seat comes back disabled, so the cabin self-heals.
         self.assertContains(response, 'Seat 1A, taken')
 
+    def test_the_header_count_is_refreshed_out_of_band(self) -> None:
+        # It lives outside the swapped map, so without this it would keep
+        # claiming the flight is empty after a booking.
+        response = self.client.post(self.url, {'seat': ['1A'], 'passenger': ['Ada Lovelace']})
+
+        self.assertContains(response, 'id="seats-remaining"')
+        self.assertContains(response, '179 of 180 free')
+
     def test_a_lost_race_is_a_200_with_an_error_banner(self) -> None:
         services.book_seats(self.flight, [services.SeatRequest('1A', 'Ada Lovelace')])
 

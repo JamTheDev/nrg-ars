@@ -17,7 +17,10 @@
   var MIN_SCALE = 0.15;
   var MAX_SCALE = 3;
   var EDGE_MARGIN = 80; // px of the cabin that must stay on screen
-  var DRAG_SLOP = 6; // movement beyond this is a pan, not a tap
+  // How far the pointer may wander and still count as a tap. A press on a
+  // touchscreen or trackpad routinely drifts ~10px, so a tight slop reads
+  // ordinary taps as pans and silently drops them.
+  var DRAG_SLOP = 14;
   var FRICTION = 0.92;
   var MIN_VELOCITY = 0.05;
 
@@ -28,7 +31,8 @@
   var pointers = new Map();
   var lastPan = null; // {x, y} of the single active pointer
   var pinch = null; // {distance, scale}
-  var moved = 0;
+  var moved = 0; // furthest the pointer strayed from where it went down
+  var origin = null; // where it went down
   var downTarget = null; // what the gesture started on, for tap dispatch
   var velocity = { x: 0, y: 0 };
   var glide = null;
@@ -141,6 +145,7 @@
 
     if (pointers.size === 1) {
       lastPan = { x: event.clientX, y: event.clientY };
+      origin = { x: event.clientX, y: event.clientY };
       moved = 0;
       downTarget = event.target;
       velocity = { x: 0, y: 0 };
@@ -170,7 +175,11 @@
     var dy = event.clientY - lastPan.y;
     lastPan = { x: event.clientX, y: event.clientY };
 
-    moved += Math.hypot(dx, dy);
+    // Distance from the origin, not distance travelled: a hand that jitters
+    // back and forth over the same spot has not panned anywhere.
+    if (origin) {
+      moved = Math.max(moved, Math.hypot(event.clientX - origin.x, event.clientY - origin.y));
+    }
     velocity = { x: dx, y: dy };
     tx += dx;
     ty += dy;
@@ -219,6 +228,9 @@
   );
 
   viewport.addEventListener('dblclick', function (event) {
+    // Double-tapping a seat is someone picking a seat emphatically, not asking
+    // to zoom. Only empty cabin space zooms.
+    if (event.target.closest('.seat')) return;
     zoomAt(event.clientX, event.clientY, 1.6);
   });
 

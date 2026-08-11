@@ -82,10 +82,24 @@
     emptyNote.hidden = selected.length > 0;
   }
 
+  var DOUBLE_TAP_MS = 400;
+  var lastTap = { designation: null, at: 0 };
+
   function toggle(seat) {
     if (!seat || seat.disabled || !map.contains(seat)) return;
 
     var designation = seat.dataset.seat;
+    var now = Date.now();
+
+    /* Swallow the second half of a double-tap. Toggling twice in a blink
+     * leaves the seat exactly as it was, which reads to the passenger as the
+     * seat map ignoring them. Deselecting stays available a moment later. */
+    if (lastTap.designation === designation && now - lastTap.at < DOUBLE_TAP_MS) {
+      lastTap.at = now;
+      return;
+    }
+    lastTap = { designation: designation, at: now };
+
     if (seat.getAttribute('aria-pressed') === 'true') {
       deselect(designation);
       return;

@@ -1,0 +1,10 @@
+{% comment %}
+  The header's availability count. It sits outside the swapped seat map, so
+  booking responses re-send it as an out-of-band swap -- otherwise the cabin
+  updates while the count next to it keeps insisting the flight is empty.
+  hx-swap-oob is inert on the initial page load; htmx only acts on it in
+  content it swaps in.
+{% endcomment %}
+<span id="seats-remaining" hx-swap-oob="true" class="font-medium text-emerald-700">
+  {{ cabin.seats_available }} of {{ cabin.seats_total }} free
+</span>

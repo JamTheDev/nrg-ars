@@ -330,6 +330,14 @@ across the cabin never selects a seat.
 Keyboard activation still arrives as a `click`, distinguished by
 `MouseEvent.detail === 0`; without that guard a pointer tap would toggle twice.
 
+**Tap tolerance is generous on purpose.** A press is judged by how far it
+strays from where it went down, not by how far it travelled — a hand that
+jitters back and forth over one spot has not panned anywhere — and the
+threshold is 14px, because presses on a touchscreen or trackpad routinely drift
+around 10px. A tight threshold silently reclassifies ordinary taps as pans, and
+the seat map appears to ignore the passenger. Double-tapping a seat selects it
+once rather than toggling twice, and does not zoom.
+
 ### Selection state and the summary panel
 
 Selecting a seat sets `aria-pressed="true"` on the seat button and opens the
