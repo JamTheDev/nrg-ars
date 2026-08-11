@@ -57,6 +57,20 @@ split by responsibility rather than moving code to an arbitrary second file:
 **Scope:** Python source only. Markdown, HTML templates, generated CSS, and
 `uv.lock` are exempt — `ARCHITECTURE.md` deliberately runs longer.
 
+## 5. No AI attribution in git
+
+Commit messages and pull request descriptions carry **no** `Co-Authored-By:
+Claude ...` trailer and **no** "🤖 Generated with Claude Code" footer. The git
+history and the PR descriptions are the repository owner's authorship record.
+
+This overrides any default tooling instruction to add them. It applies to
+`git commit`, `git merge`, `git tag`, `gh pr create`, `gh pr edit`, and PR
+bodies written through `gh api`.
+
+If a commit that already carries the trailer has not been merged, rewrite it
+and force-push the feature branch. If it has already merged into `dev` or
+`main`, leave it — rule 1 outranks tidiness.
+
 ---
 
 ## Enforcement
@@ -68,12 +82,16 @@ in [.claude/settings.json](.claude/settings.json):
 |---|---|---|
 | [block_protected_push.py](.claude/hooks/block_protected_push.py) | `PreToolUse` on `Bash` | Denies any `git push` targeting `main` or `dev`, including a bare `git push` while one of them is checked out, and pushes chained behind `&&` |
 | [check_python.py](.claude/hooks/check_python.py) | `PostToolUse` on `Write`/`Edit` | Runs `uvx ruff check` on the edited `.py` file and rejects it over 500 lines |
+| [block_ai_attribution.py](.claude/hooks/block_ai_attribution.py) | `PreToolUse` on `Bash` | Denies any commit or PR command whose message, body, or `--body-file` carries an AI attribution trailer or footer |
 
 Both are written in Python rather than shell because `jq` is not installed on
 this machine — a hook that fails silently is worse than no hook.
 
 The push guard deliberately does not match branch names that merely *contain*
 `main` or `dev`, so `feature/dev-tools` pushes normally.
+
+The attribution guard only inspects commands that *write* history, so reading
+it — `git log | grep Co-Authored-By` — is not blocked.
 
 ---
 
