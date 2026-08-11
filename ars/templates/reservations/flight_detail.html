@@ -66,7 +66,14 @@
       asks the server for another seat beside the party, lowering it drops the
       most recent pick here in the page.
     {% endcomment %}
-    <div id="reserve-bar-wrap" class="pointer-events-none fixed inset-x-0 bottom-6 z-20 flex justify-center px-4">
+    <div id="reserve-bar-wrap" class="pointer-events-none fixed inset-x-0 bottom-6 z-20 flex flex-col items-center gap-2 px-4">
+      <p
+        id="party-limit-note"
+        hidden
+        role="status"
+        class="rounded-full bg-slate-900 px-4 py-1.5 text-xs font-medium text-white shadow-lg"
+      >Up to {{ max_party_size }} seats per booking.</p>
+
       <div class="pointer-events-auto flex items-center gap-4 rounded-full border border-slate-200 bg-white/95 py-2 pl-5 pr-2 shadow-lg backdrop-blur">
         <span class="text-sm text-slate-500">Reserve for&hellip;</span>
 

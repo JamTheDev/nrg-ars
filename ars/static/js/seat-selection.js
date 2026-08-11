@@ -27,6 +27,7 @@
   var currency = panel.dataset.currency || '';
 
   var selected = []; // designations, in the order they were picked
+  var locked = false; // true once the party is being named: the cabin freezes
 
   function seatButton(designation) {
     return map.querySelector('[data-seat="' + designation + '"]');
@@ -87,7 +88,7 @@
   var lastTap = { designation: null, at: 0 };
 
   function toggle(seat) {
-    if (!seat || seat.disabled || !map.contains(seat)) return;
+    if (locked || !seat || seat.disabled || !map.contains(seat)) return;
 
     var designation = seat.dataset.seat;
     var now = Date.now();
@@ -103,6 +104,13 @@
 
     if (seat.getAttribute('aria-pressed') === 'true') {
       deselect(designation);
+      return;
+    }
+
+    /* The cap applies however seats are chosen. Capping only the stepper would
+     * let the same booking exceed it by tapping. */
+    if (selected.length >= maxParty) {
+      flashLimit();
       return;
     }
 
@@ -152,11 +160,18 @@
   var firstForm = document.getElementById('panel-first');
   var fields = document.getElementById('passenger-fields');
 
+  /* Anything past the summary is a booking in progress. The seats being named
+   * must not move while they are being named, so the cabin locks: unselected
+   * seats grey out, no seat responds, and the stepper is disabled. */
   function showStep(step) {
     summary.hidden = step !== 'summary';
     summaryFooter.hidden = step !== 'summary';
     namesForm.hidden = step !== 'names';
     firstForm.hidden = step !== 'first';
+
+    locked = step !== 'summary';
+    if (viewport) viewport.dataset.locked = locked ? 'true' : 'false';
+    renderParty();
   }
 
   /* One name per seat, seat and passenger adjacent so the POST pairs them by
@@ -233,13 +248,26 @@
   var mapUrl = panel.dataset.mapUrl;
   var pending = null;
   var desired = 0; // party size being asked for, which leads the selection
+  var limitNote = document.getElementById('party-limit-note');
+  var limitTimer = null;
 
   function renderParty() {
     // Whenever the state settles, the target and the selection agree again.
     desired = selected.length;
     if (partyCount) partyCount.textContent = String(selected.length);
-    if (partyUp) partyUp.disabled = selected.length >= maxParty;
-    if (partyDown) partyDown.disabled = selected.length === 0;
+    if (partyUp) partyUp.disabled = locked || selected.length >= maxParty;
+    if (partyDown) partyDown.disabled = locked || selected.length === 0;
+  }
+
+  /* Say why a tap did nothing. A seat that refuses silently is the bug this
+   * project has already shipped once. */
+  function flashLimit() {
+    if (!limitNote) return;
+    limitNote.hidden = false;
+    clearTimeout(limitTimer);
+    limitTimer = setTimeout(function () {
+      limitNote.hidden = true;
+    }, 2500);
   }
 
   function focusSeats(elements) {
@@ -257,10 +285,13 @@
    * the current selection". Four quick taps from two is a party of six, not
    * four requests that all ask for three. */
   function grow() {
-    if (!mapUrl || !window.htmx) return;
+    if (locked || !mapUrl || !window.htmx) return;
 
     var target = Math.min(maxParty, Math.max(desired, selected.length) + 1);
-    if (target === desired) return;
+    if (target === desired) {
+      flashLimit();
+      return;
+    }
     desired = target;
     if (partyCount) partyCount.textContent = String(desired);
 
@@ -275,7 +306,7 @@
   }
 
   function shrink() {
-    if (!selected.length) return;
+    if (locked || !selected.length) return;
     deselect(selected[selected.length - 1]);
   }
 

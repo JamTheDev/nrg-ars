@@ -17,6 +17,18 @@
   color: var(--color-emerald-950);
 }
 
+/* While a booking is being confirmed the cabin is frozen: the seats being
+   named must not change underneath the passenger. Unselected seats grey out,
+   and no seat responds to a tap. Panning and zooming still work, so they can
+   look around while typing. */
+#seat-map-viewport[data-locked="true"] .seat {
+  pointer-events: none;
+}
+
+#seat-map-viewport[data-locked="true"] .seat:not([aria-pressed="true"]) {
+  opacity: 0.3;
+}
+
 /* Reservation side panel: off-canvas until data-open. */
 #reserve-panel {
   transform: translateX(100%);

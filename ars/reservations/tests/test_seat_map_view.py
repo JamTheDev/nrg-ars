@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from datetime import timedelta
 
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from reservations import services
-from reservations.models import Flight
+from reservations.models import Booking, Flight, Passenger, Seat
 
 
 def pressed_seats(response) -> list[str]:
@@ -29,6 +29,19 @@ class SeatMapViewTests(TestCase):
             departs_at=timezone.now() + timedelta(hours=3),
         )
         self.url = reverse('seat-map', args=[self.flight.id])
+        self.filler = Passenger.objects.create(full_name='Filler')
+
+    def occupy(self, designations: Iterable[str]) -> None:
+        """Shape the cabin. Bulk-created: these are fixtures, not bookings, and
+        booking them through services would hit the party cap."""
+        wanted = {d.upper() for d in designations}
+        Booking.objects.bulk_create(
+            [
+                Booking(flight=self.flight, seat=seat, passenger=self.filler)
+                for seat in Seat.objects.all()
+                if seat.designation in wanted
+            ]
+        )
 
     def test_without_a_party_nothing_is_selected(self) -> None:
         response = self.client.get(self.url)
@@ -47,14 +60,8 @@ class SeatMapViewTests(TestCase):
 
     def test_a_split_party_says_so(self) -> None:
         # One seat free per row: four passengers cannot sit together.
-        services.book_seats(
-            self.flight,
-            [
-                services.SeatRequest(f'{row}{column}', 'Filler')
-                for row in range(1, 31)
-                for column in 'ABCDE'
-            ],
-        )
+        self.occupy(f'{row}{column}' for row in range(1, 31) for column in 'ABCDE')
+
         response = self.client.get(self.url, {'party': 4})
 
         self.assertEqual(pressed_seats(response), ['1F', '2F', '3F', '4F'])
@@ -83,13 +90,8 @@ class SeatMapViewTests(TestCase):
         self.assertEqual(pressed_seats(response), ['1A'])
 
     def test_a_party_larger_than_the_cabin_has_left(self) -> None:
-        services.book_seats(
-            self.flight,
-            [
-                services.SeatRequest(seat, 'Filler')
-                for seat in [f'{row}{c}' for row in range(1, 31) for c in 'ABCDEF'][:178]
-            ],
-        )
+        self.occupy([f'{row}{c}' for row in range(1, 31) for c in 'ABCDEF'][:178])
+
         response = self.client.get(self.url, {'party': 3})
 
         self.assertContains(response, 'Only 2 seats left')
