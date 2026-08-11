@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
+from decimal import Decimal
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -142,6 +143,15 @@ STATICFILES_DIRS = [BASE_DIR / 'static']
 CABIN_ROWS = 30
 
 CABIN_COLUMNS = 'ABCDEF'
+
+
+# Fares
+# Placeholder flat pricing so the reservation panel can show a total. A real
+# per-flight fare belongs on Flight once booking is implemented.
+
+SEAT_FARE = Decimal('50.00')
+
+CURRENCY_SYMBOL = '$'
 
 
 # Email

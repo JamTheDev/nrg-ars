@@ -27,7 +27,7 @@ in the cabin exactly once (180 rows total for a 30×6 cabin), and *all* flights
 reference that same catalog. Seat occupancy is a property of `Booking`, not of
 `Seat`.
 
-The alternative — copying 180 `Seat` rows per flight — was rejected: it
+The alternative is copying 180 `Seat` rows per flight — was rejected: it
 multiplies storage by the flight count and makes "seat 12C" ambiguous across
 flights for no benefit while the layout is uniform.
 
@@ -198,6 +198,28 @@ Four distinct failure modes, each with its own message — collapsing them into 
 
 Two kiosks requesting 1A at the same instant must not both succeed.
 
+### Policy: let both try, first commit wins
+
+Neither request is turned away up front. A and B both reach the database; the
+one whose `INSERT` commits first owns the seat, and the other is blocked with
+"12C was just taken". Nothing is reserved in advance — there is no lock queue,
+no seat hold, and no "checking availability…" step that could leave a seat
+frozen behind an abandoned session.
+
+The consequence to accept: **losing is discovered at commit, not at click.** A
+passenger can tap a free-looking seat and still be refused a moment later, so
+the error path is a normal outcome to design for, not an edge case. The seat map
+self-heals on the next swap (§6), which keeps the window small.
+
+Ordering is decided by SQLite's write lock, not by when a request arrived at the
+server. Under contention the "first" request is the first to commit, which for a
+kiosk-scale system is the only ordering worth guaranteeing.
+
+> **First-available is the deliberate exception.** Blocking the loser is right
+> when the passenger asked for *1A* specifically. When they asked for "any
+> seat", failing them because someone else took 1A serves nobody — that path
+> retries onto the next free seat instead (point 3 below).
+
 ### `select_for_update()` is not available here
 
 Django's SQLite backend does **not** implement `SELECT … FOR UPDATE`. It inherits
@@ -274,10 +296,51 @@ Templates split so the fragment and the full page render the identical markup:
 
 ```
 templates/reservations/
+├── flight_list.html        departures board
 ├── flight_detail.html      {% include "reservations/_seat_map.html" %}
 ├── _seat_map.html          ← returned directly by booking POSTs
+├── _seat.html              one seat button
 └── _booking_result.html    ← success / error banner
 ```
+
+### The kiosk camera
+
+The seat map is drag/pinch/scroll navigable (`static/js/seatmap.js`, vanilla
+Pointer Events — no library, nothing from a CDN). The pan/zoom transform is
+applied to `#seat-map-canvas`, one level **above** the `#seat-map` fragment:
+
+```
+#seat-map-viewport   clips, owns the gestures
+└── #seat-map-canvas transform: translate(...) scale(...)
+    └── #seat-map    ← the swappable fragment
+```
+
+Putting the transform outside the fragment is what lets a booking swap refresh
+the cabin without throwing away where the user was looking.
+
+**Seat taps do not come from `click`.** The camera calls `setPointerCapture()`
+so a pan that leaves the viewport keeps tracking, and capture retargets the
+compatibility mouse events that follow — the real `click` is delivered to the
+viewport, not to the seat under the finger. The camera therefore measures the
+gesture itself and publishes a `seatmap:tap` CustomEvent carrying the
+`pointerdown` target, which is the last honest answer available. A press that
+travelled more than a few pixels was a pan and publishes nothing, so dragging
+across the cabin never selects a seat.
+
+Keyboard activation still arrives as a `click`, distinguished by
+`MouseEvent.detail === 0`; without that guard a pointer tap would toggle twice.
+
+### Selection state and the summary panel
+
+Selecting a seat sets `aria-pressed="true"` on the seat button and opens the
+`#reserve-panel` side sheet (`static/js/seat-selection.js`).
+
+**State that JavaScript toggles is styled from `static/src/input.css`, not from
+Tailwind classes swapped in JS.** Tailwind only compiles classes it can see in
+the scanned templates, so a class named only inside a `.js` file produces no CSS
+and fails silently at runtime. The selected-seat green, the panel's off-canvas
+transform, and the reserve bar's shift are therefore plain CSS rules keyed off
+`aria-pressed` / `data-open`.
 
 Each seat is a button posting its own designation:
 
@@ -494,7 +557,15 @@ CLI (see README).
 
 ## 11. Open Decisions
 
-- **No route for `/` yet** — flight list is the natural candidate.
+- ~~**No route for `/` yet**~~ — resolved: `/` renders the flight list and each
+  row links to `/flights/<id>/`, the pan/zoom seat map.
+- **Selection is client-side only.** Picking seats fills the summary panel, but
+  nothing reaches the server, no seat is held, and neither *Continue* button
+  does anything. Booking still needs `services.py` (§3–§5) and the POST routes
+  in §6. The party-size stepper remains inert.
+- **`SEAT_FARE` is a flat placeholder** in settings so the panel can show a
+  total. Real pricing belongs on `Flight` (or a fare class), which is a
+  migration, not a config edit.
 - **No seat holds.** A booking is immediate and final; there is no cancellation
   path. Both were scoped out deliberately.
 - **`DEBUG = True`** and no deployment target chosen.
