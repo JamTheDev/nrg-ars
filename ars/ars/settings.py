@@ -151,6 +151,11 @@ CABIN_ROWS = 30
 
 CABIN_COLUMNS = 'ABCDEF'
 
+# Largest party the stepper will auto-seat. One full row: beyond this even
+# "everyone in the same row" cannot hold the party, so the pick is guaranteed
+# to scatter and is better handled as separate bookings.
+MAX_PARTY_SIZE = 6
+
 
 # Fares
 # Placeholder flat pricing so the reservation panel can show a total. A real

@@ -70,3 +70,23 @@ class NothingSelectedError(BookingError):
 
     def __init__(self) -> None:
         super().__init__('Pick at least one seat first.')
+
+
+class PartyTooLargeError(BookingError):
+    """More passengers than one booking will take."""
+
+    def __init__(self, size: int, maximum: int) -> None:
+        self.size = size
+        super().__init__(f'Parties are limited to {maximum} passengers at a time.')
+
+
+class NotEnoughSeatsError(BookingError):
+    """The party is larger than what is left on the flight."""
+
+    def __init__(self, size: int, available: int) -> None:
+        self.size = size
+        self.available = available
+        seats = 'seat' if available == 1 else 'seats'
+        super().__init__(
+            f'Only {available} {seats} left on this flight, and you asked for {size}.'
+        )

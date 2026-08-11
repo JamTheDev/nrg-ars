@@ -227,6 +227,48 @@
     { passive: false }
   );
 
+  /* Bring a set of seats into view. Auto-picking seats the passenger cannot
+   * see is indistinguishable from auto-picking nothing.
+   *
+   * The seats' rectangles are already in screen coordinates under the current
+   * transform, so the camera moves by the difference between their centre and
+   * the viewport's -- no unpicking of the transform required. */
+  viewport.addEventListener('seatmap:focus', function (event) {
+    var targets = (event.detail && event.detail.targets) || [];
+    if (!targets.length) return;
+
+    function bounds() {
+      var rects = targets.map(function (el) {
+        return el.getBoundingClientRect();
+      });
+      return {
+        left: Math.min.apply(null, rects.map(function (r) { return r.left; })),
+        right: Math.max.apply(null, rects.map(function (r) { return r.right; })),
+        top: Math.min.apply(null, rects.map(function (r) { return r.top; })),
+        bottom: Math.max.apply(null, rects.map(function (r) { return r.bottom; })),
+      };
+    }
+
+    var view = viewport.getBoundingClientRect();
+    var box = bounds();
+    var margin = 0.6; // leave room around the party, and for the panel
+
+    // Zoom out only if the party does not already fit.
+    var fits = Math.min(
+      (view.width * margin) / (box.right - box.left),
+      (view.height * margin) / (box.bottom - box.top)
+    );
+    if (fits < 1) {
+      zoomAt((box.left + box.right) / 2, (box.top + box.bottom) / 2, fits);
+      box = bounds();
+    }
+
+    stopGlide();
+    tx += view.left + view.width / 2 - (box.left + box.right) / 2;
+    ty += view.top + view.height / 2 - (box.top + box.bottom) / 2;
+    render();
+  });
+
   viewport.addEventListener('dblclick', function (event) {
     // Double-tapping a seat is someone picking a seat emphatically, not asking
     // to zoom. Only empty cabin space zooms.

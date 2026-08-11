@@ -80,6 +80,7 @@
     renderChips();
     totalOutput.textContent = formatMoney(selected.length * fare);
     emptyNote.hidden = selected.length > 0;
+    renderParty();
   }
 
   var DOUBLE_TAP_MS = 400;
@@ -218,8 +219,75 @@
     });
   });
 
-  /* The POST returns a freshly rendered cabin, so every seat button is a new
-   * element and the old selection no longer refers to anything. Drop it. */
+  /* ---- Party size ------------------------------------------------------
+   *
+   * The stepper has no state of its own: it displays the number of selected
+   * seats. Picking seats by hand moves it; moving it changes the seats. There
+   * is no arrangement where the panel claims 3 and two seats are lit.
+   */
+
+  var partyCount = document.querySelector('[data-party="count"]');
+  var partyUp = document.querySelector('[data-party="increment"]');
+  var partyDown = document.querySelector('[data-party="decrement"]');
+  var maxParty = parseInt(panel.dataset.maxParty, 10) || 6;
+  var mapUrl = panel.dataset.mapUrl;
+  var pending = null;
+  var desired = 0; // party size being asked for, which leads the selection
+
+  function renderParty() {
+    // Whenever the state settles, the target and the selection agree again.
+    desired = selected.length;
+    if (partyCount) partyCount.textContent = String(selected.length);
+    if (partyUp) partyUp.disabled = selected.length >= maxParty;
+    if (partyDown) partyDown.disabled = selected.length === 0;
+  }
+
+  function focusSeats(elements) {
+    if (!viewport || !elements.length) return;
+    viewport.dispatchEvent(
+      new CustomEvent('seatmap:focus', { detail: { targets: elements } })
+    );
+  }
+
+  /* Growing the party needs the cabin, so it asks the server. Shrinking does
+   * not: dropping the seat most recently added is something the page can do on
+   * its own, instantly, without the server helpfully rearranging seats the
+   * passenger deliberately chose. */
+  /* Taps accumulate into a target rather than each asking for "one more than
+   * the current selection". Four quick taps from two is a party of six, not
+   * four requests that all ask for three. */
+  function grow() {
+    if (!mapUrl || !window.htmx) return;
+
+    var target = Math.min(maxParty, Math.max(desired, selected.length) + 1);
+    if (target === desired) return;
+    desired = target;
+    if (partyCount) partyCount.textContent = String(desired);
+
+    clearTimeout(pending);
+    pending = setTimeout(function () {
+      window.htmx.ajax('GET', mapUrl, {
+        target: '#seat-map',
+        swap: 'outerHTML',
+        values: { party: desired, keep: selected.join(',') },
+      });
+    }, 200);
+  }
+
+  function shrink() {
+    if (!selected.length) return;
+    deselect(selected[selected.length - 1]);
+  }
+
+  if (partyUp) partyUp.addEventListener('click', grow);
+  if (partyDown) partyDown.addEventListener('click', shrink);
+
+  /* One rule for every swap: the selection is whatever the server rendered as
+   * pressed, in document order.
+   *
+   * A booking response presses nothing, so the selection clears. A party pick
+   * presses N seats, so the selection adopts them. No flag distinguishes the
+   * two, and the client never disagrees with the map it is looking at. */
   document.body.addEventListener('htmx:afterSwap', function () {
     var current = document.getElementById('seat-map');
     // Identity, not the event target: which element htmx reports for an
@@ -227,12 +295,22 @@
     if (!current || current === map) return;
 
     map = current;
-    selected = [];
+    var pressed = Array.prototype.slice.call(
+      map.querySelectorAll('.seat[aria-pressed="true"]')
+    );
+    selected = pressed.map(function (seat) {
+      return seat.dataset.seat;
+    });
     render();
     showStep('summary');
 
     var status = document.getElementById('booking-status');
-    if (status && status.dataset.status === 'ok') closePanel();
+    if (selected.length) {
+      openPanel();
+      focusSeats(pressed);
+    } else if (status && status.dataset.status === 'ok') {
+      closePanel();
+    }
   });
 
   render();

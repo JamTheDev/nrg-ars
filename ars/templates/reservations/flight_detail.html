@@ -61,15 +61,19 @@
       </p>
     </div>
 
-    {# Reserve bar. The stepper and Continue are still presentation only. #}
+    {% comment %}
+      Reserve bar. The stepper shows how many seats are selected: raising it
+      asks the server for another seat beside the party, lowering it drops the
+      most recent pick here in the page.
+    {% endcomment %}
     <div id="reserve-bar-wrap" class="pointer-events-none fixed inset-x-0 bottom-6 z-20 flex justify-center px-4">
       <div class="pointer-events-auto flex items-center gap-4 rounded-full border border-slate-200 bg-white/95 py-2 pl-5 pr-2 shadow-lg backdrop-blur">
         <span class="text-sm text-slate-500">Reserve for&hellip;</span>
 
         <div class="flex items-center gap-1">
-          <button type="button" data-party="decrement" class="h-8 w-8 rounded-full text-slate-500 transition hover:bg-slate-100" aria-label="Fewer passengers">&lsaquo;</button>
-          <span data-party="count" class="w-8 text-center font-mono text-base font-semibold text-slate-900">1</span>
-          <button type="button" data-party="increment" class="h-8 w-8 rounded-full text-slate-500 transition hover:bg-slate-100" aria-label="More passengers">&rsaquo;</button>
+          <button type="button" data-party="decrement" class="h-8 w-8 rounded-full text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent" aria-label="Fewer passengers">&lsaquo;</button>
+          <span data-party="count" aria-live="polite" class="w-8 text-center font-mono text-base font-semibold text-slate-900">0</span>
+          <button type="button" data-party="increment" class="h-8 w-8 rounded-full text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent" aria-label="More passengers">&rsaquo;</button>
         </div>
 
         <button
@@ -90,6 +94,8 @@
       data-open="false"
       data-fare="{{ seat_fare }}"
       data-currency="{{ currency_symbol }}"
+      data-max-party="{{ max_party_size }}"
+      data-map-url="{% url 'seat-map' flight.id %}"
       aria-hidden="true"
       aria-label="Reservation summary"
     >

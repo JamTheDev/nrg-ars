@@ -5,10 +5,12 @@ See ARCHITECTURE.md section 6 for the URL and fragment design.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from reservations import selectors, services
 from reservations.exceptions import BookingError, InvalidPassengerError
@@ -33,12 +35,18 @@ def flight_detail(request: HttpRequest, flight_id: int) -> HttpResponse:
             'cabin': selectors.seat_map(flight),
             'seat_fare': settings.SEAT_FARE,
             'currency_symbol': settings.CURRENCY_SYMBOL,
+            'max_party_size': settings.MAX_PARTY_SIZE,
         },
     )
 
 
 def _booking_response(
-    request: HttpRequest, flight: Flight, *, message: str, ok: bool
+    request: HttpRequest,
+    flight: Flight,
+    *,
+    message: str,
+    ok: bool,
+    selected: Iterable[str] = (),
 ) -> HttpResponse:
     """The refreshed cabin plus a status banner swapped out of band.
 
@@ -52,10 +60,44 @@ def _booking_response(
         'reservations/_booking_response.html',
         {
             'flight': flight,
-            'cabin': selectors.seat_map(flight),
+            'cabin': selectors.seat_map(flight, selected=selected),
             'status_message': message,
             'status_ok': ok,
         },
+    )
+
+
+@require_GET
+def seat_map(request: HttpRequest, flight_id: int) -> HttpResponse:
+    """The cabin fragment, optionally with a party's seats already chosen.
+
+    `?party=N` auto-picks N seats seated together where the cabin allows, and
+    `?keep=12A,12B` holds on to seats the passenger chose by hand while the
+    rest are filled in around them.
+    """
+    flight = get_object_or_404(Flight, pk=flight_id)
+    party = request.GET.get('party')
+    keep = [value for value in request.GET.get('keep', '').split(',') if value.strip()]
+
+    if party is None:
+        return _booking_response(request, flight, message='', ok=True, selected=keep)
+
+    try:
+        size = int(party)
+    except ValueError:
+        return _booking_response(
+            request, flight, message='That is not a number of passengers.', ok=False, selected=keep
+        )
+
+    try:
+        pick = selectors.pick_party_seats(flight, size, keep)
+    except BookingError as exc:
+        # The seats already chosen survive a refused change.
+        return _booking_response(request, flight, message=str(exc), ok=False, selected=keep)
+
+    message = '' if pick.is_together else 'Seated as close together as the cabin allows.'
+    return _booking_response(
+        request, flight, message=message, ok=True, selected=pick.designations
     )
 
 

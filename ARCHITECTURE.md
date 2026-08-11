@@ -290,7 +290,7 @@ Full page loads only on navigation. Every booking action swaps a fragment.
 | `GET /flights/<id>/` | `flight-detail` | Full page: seat map + booking form |
 | `POST /flights/<id>/book/` | `book-seat` | **Fragment** — updated seat map |
 | `POST /flights/<id>/book/first/` | `book-first` | **Fragment** — updated seat map |
-| `GET /flights/<id>/map/` | `seat-map` | **Fragment** — seat map alone |
+| `GET /flights/<id>/map/` | `seat-map` | **Fragment** — seat map, optionally with a party's seats already chosen (`?party=4&keep=12A`) |
 
 Templates split so the fragment and the full page render the identical markup:
 
@@ -338,10 +338,31 @@ around 10px. A tight threshold silently reclassifies ordinary taps as pans, and
 the seat map appears to ignore the passenger. Double-tapping a seat selects it
 once rather than toggling twice, and does not zoom.
 
+### Party seating
+
+`selectors.pick_party_seats()` chooses N seats for one party. A 3 + 3 cabin
+makes the longest unbroken run **three**, so a party of four can never be one
+block — "together" is a ladder, and the same row across the aisle counts:
+
+1. one block, taking the **smallest** that fits so a party of two does not
+   consume the last run of three
+2. one row, across the aisle
+3. two adjacent rows
+4. fewest groups, front-most
+
+It lives in `selectors.py` rather than JavaScript so the management commands and
+the natural-language assistant (§7) can reuse the one implementation, and so it
+is testable without a browser. Two queries, whatever the party size.
+
 ### Selection state and the summary panel
 
 Selecting a seat sets `aria-pressed="true"` on the seat button and opens the
 `#reserve-panel` side sheet (`static/js/seat-selection.js`).
+
+After **any** swap of `#seat-map`, the selection is exactly the seats the server
+rendered as pressed, in document order. A booking response presses nothing, so
+the selection clears; a party pick presses N seats, so it is adopted. One rule,
+no flag, and the client never disagrees with the map in front of it.
 
 **State that JavaScript toggles is styled from `static/src/input.css`, not from
 Tailwind classes swapped in JS.** Tailwind only compiles classes it can see in
@@ -576,8 +597,9 @@ CLI (see README).
   serving two of three passengers and charging for it is worse than refusing.
 - **No `print_flight` command yet** — core requirement 1's literal "print"
   (§2) is still unimplemented; the web seat map covers the display half.
-- **The party-size stepper remains inert.** Selection count and party size are
-  not yet connected.
+- **Party size and selection are one value.** The stepper displays the number of
+  selected seats; raising it asks the server for another seat beside the party,
+  lowering it drops the newest pick in the page.
 - **No cancellation.** A booking is immediate and final.
 - **`SEAT_FARE` is a flat placeholder** in settings so the panel can show a
   total. Real pricing belongs on `Flight` (or a fare class), which is a

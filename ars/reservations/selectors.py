@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from django.conf import settings
 from django.db.models import Count
 from django.utils import timezone
 
+from reservations.exceptions import NotEnoughSeatsError, PartyTooLargeError
 from reservations.models import Booking, Flight, Seat
 
 
@@ -30,10 +33,17 @@ class FlightRow:
 
 @dataclass(frozen=True)
 class SeatCell:
-    """One seat as the cabin view needs it: the position plus its occupancy."""
+    """One seat as the cabin view needs it: the position plus its occupancy.
+
+    `is_selected` is what the server renders as pressed. The client adopts it
+    wholesale after every swap, so a booking response (nothing selected) clears
+    the selection and a party pick (N selected) installs one, with no flag
+    distinguishing the two.
+    """
 
     seat: Seat
     is_taken: bool
+    is_selected: bool = False
 
     @property
     def designation(self) -> str:
@@ -113,22 +123,203 @@ def aisle_index() -> int:
     return len(settings.CABIN_COLUMNS) // 2
 
 
-def seat_map(flight: Flight) -> Cabin:
+def seat_map(flight: Flight, selected: Iterable[str] = ()) -> Cabin:
     """Every cabin position for `flight`, marked taken or free.
 
     Two queries: the seat catalog, and the seat ids booked on this flight --
     not one per seat. Occupancy is derived from `Booking`; there is no stored
     flag that could go stale.
+
+    `selected` names the designations to render as pressed.
     """
     taken_ids = set(Booking.objects.filter(flight=flight).values_list('seat_id', flat=True))
+    chosen = {designation.upper() for designation in selected}
     split = aisle_index()
 
     grouped: dict[int, list[SeatCell]] = {}
     for seat in Seat.objects.all():
-        grouped.setdefault(seat.row, []).append(SeatCell(seat=seat, is_taken=seat.id in taken_ids))
+        is_taken = seat.id in taken_ids
+        grouped.setdefault(seat.row, []).append(
+            SeatCell(
+                seat=seat,
+                is_taken=is_taken,
+                is_selected=not is_taken and seat.designation in chosen,
+            )
+        )
 
     rows = [
         CabinRow(number=number, left=cells[:split], right=cells[split:])
         for number, cells in sorted(grouped.items())
     ]
     return Cabin(rows=rows)
+
+
+# --- Party seating -------------------------------------------------------
+#
+# A 3 + 3 cabin means the longest unbroken run of seats is three, so a party of
+# four can never be one block. "Together" is therefore a ladder, and the same
+# row across the aisle counts -- to a family it plainly is. See
+# docs/plans/06-party-size-auto-select.md.
+
+Tier = Literal['block', 'row', 'adjacent-rows', 'scattered']
+
+
+@dataclass(frozen=True)
+class PartyPick:
+    """Seats chosen for one party, and how well they ended up seated."""
+
+    seats: list[Seat]
+    tier: Tier
+
+    @property
+    def designations(self) -> list[str]:
+        return [seat.designation for seat in self.seats]
+
+    @property
+    def is_together(self) -> bool:
+        return self.tier in ('block', 'row')
+
+
+def _blocks(cabin: Cabin) -> list[list[SeatCell]]:
+    """Maximal runs of free seats within one side of one row, front to back.
+
+    The aisle breaks a run: 12C and 12D are neighbours on the map but not to
+    anyone trying to hold a conversation.
+    """
+    found = []
+    for row in cabin.rows:
+        for side in (row.left, row.right):
+            run: list[SeatCell] = []
+            for cell in side:
+                if cell.is_taken:
+                    if run:
+                        found.append(run)
+                    run = []
+                else:
+                    run.append(cell)
+            if run:
+                found.append(run)
+    return found
+
+
+def _cabin_order(cells: Iterable[SeatCell]) -> list[SeatCell]:
+    return sorted(cells, key=lambda cell: (cell.seat.row, cell.seat.column))
+
+
+def _take_from(blocks: list[list[SeatCell]], size: int) -> list[SeatCell]:
+    """Fill `size` seats using as few separate groups as possible."""
+    chosen: list[SeatCell] = []
+    for block in sorted(blocks, key=lambda b: (-len(b), b[0].seat.row, b[0].seat.column)):
+        if len(chosen) >= size:
+            break
+        chosen.extend(block[: size - len(chosen)])
+    return chosen
+
+
+def _classify(cells: Sequence[SeatCell]) -> Tier:
+    """How well the party ended up seated, judged from the seats themselves."""
+    rows = {cell.seat.row for cell in cells}
+    columns = settings.CABIN_COLUMNS
+    indexes = sorted(columns.index(cell.seat.column) for cell in cells)
+    split = aisle_index()
+
+    if len(rows) == 1:
+        same_side = all(i < split for i in indexes) or all(i >= split for i in indexes)
+        contiguous = indexes == list(range(indexes[0], indexes[0] + len(indexes)))
+        return 'block' if same_side and contiguous else 'row'
+    if len(rows) == 2 and max(rows) - min(rows) == 1:
+        return 'adjacent-rows'
+    return 'scattered'
+
+
+def _nearest_to(kept: Sequence[SeatCell], free: Sequence[SeatCell], count: int) -> list[SeatCell]:
+    """The `count` free seats closest to seats the passenger already chose.
+
+    Distance is rows first, then whether it is the same side of the aisle, then
+    columns -- 12C is nearer to 12B than 14B is, and a seat across the aisle in
+    the same row beats one two rows back.
+    """
+    columns = settings.CABIN_COLUMNS
+    split = aisle_index()
+
+    def distance(cell: SeatCell) -> tuple[int, int, int, int, str]:
+        index = columns.index(cell.seat.column)
+        side = index >= split
+        best = min(
+            (
+                abs(cell.seat.row - anchor.seat.row),
+                int(side != (columns.index(anchor.seat.column) >= split)),
+                abs(index - columns.index(anchor.seat.column)),
+            )
+            for anchor in kept
+        )
+        return (*best, cell.seat.row, cell.seat.column)
+
+    return sorted(free, key=distance)[:count]
+
+
+def pick_party_seats(
+    flight: Flight, size: int, keep: Iterable[str] = ()
+) -> PartyPick:
+    """Choose `size` free seats for one party, seated together where possible.
+
+    `keep` holds designations already chosen by hand; they are kept and the
+    remainder picked as close to them as the cabin allows. Designations in
+    `keep` that have since been booked by someone else are dropped -- the party
+    lost that seat and needs another.
+
+    Two queries, whatever the party size: this reuses seat_map().
+    """
+    maximum = settings.MAX_PARTY_SIZE
+    if size < 1 or size > maximum:
+        raise PartyTooLargeError(size, maximum)
+
+    cabin = seat_map(flight)
+    free = [cell for row in cabin.rows for cell in row.cells if not cell.is_taken]
+    if len(free) < size:
+        raise NotEnoughSeatsError(size, len(free))
+
+    wanted = {designation.upper() for designation in keep}
+    kept = [cell for cell in free if cell.designation in wanted][:size]
+
+    if kept:
+        remaining = size - len(kept)
+        pool = [cell for cell in free if cell not in kept]
+        chosen = kept + _nearest_to(kept, pool, remaining)
+    else:
+        chosen = _pick_fresh(cabin, free, size)
+
+    ordered = _cabin_order(chosen)
+    return PartyPick(seats=[cell.seat for cell in ordered], tier=_classify(ordered))
+
+
+def _pick_fresh(cabin: Cabin, free: Sequence[SeatCell], size: int) -> list[SeatCell]:
+    """Walk the preference ladder: one block, one row, two rows, anything."""
+    blocks = _blocks(cabin)
+
+    # 1. A single run. Take the smallest that fits, so a party of two does not
+    #    consume the only run of three left on the aircraft.
+    fitting = [block for block in blocks if len(block) >= size]
+    if fitting:
+        block = min(fitting, key=lambda b: (len(b), b[0].seat.row, b[0].seat.column))
+        return block[:size]
+
+    by_row: dict[int, list[SeatCell]] = {}
+    for cell in free:
+        by_row.setdefault(cell.seat.row, []).append(cell)
+
+    # 2. One row, across the aisle.
+    for number in sorted(by_row):
+        if len(by_row[number]) >= size:
+            return _take_from([b for b in blocks if b[0].seat.row == number], size)
+
+    # 3. Two rows, back to back.
+    for number in sorted(by_row):
+        pair = by_row.get(number, []) + by_row.get(number + 1, [])
+        if len(pair) >= size:
+            return _take_from(
+                [b for b in blocks if b[0].seat.row in (number, number + 1)], size
+            )
+
+    # 4. Wherever they fit, in as few groups as possible.
+    return _take_from(blocks, size)
