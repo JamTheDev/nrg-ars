@@ -330,6 +330,14 @@ across the cabin never selects a seat.
 Keyboard activation still arrives as a `click`, distinguished by
 `MouseEvent.detail === 0`; without that guard a pointer tap would toggle twice.
 
+**Tap tolerance is generous on purpose.** A press is judged by how far it
+strays from where it went down, not by how far it travelled — a hand that
+jitters back and forth over one spot has not panned anywhere — and the
+threshold is 14px, because presses on a touchscreen or trackpad routinely drift
+around 10px. A tight threshold silently reclassifies ordinary taps as pans, and
+the seat map appears to ignore the passenger. Double-tapping a seat selects it
+once rather than toggling twice, and does not zoom.
+
 ### Selection state and the summary panel
 
 Selecting a seat sets `aria-pressed="true"` on the seat button and opens the
@@ -559,14 +567,21 @@ CLI (see README).
 
 - ~~**No route for `/` yet**~~ — resolved: `/` renders the flight list and each
   row links to `/flights/<id>/`, the pan/zoom seat map.
-- **Selection is client-side only.** Picking seats fills the summary panel, but
-  nothing reaches the server, no seat is held, and neither *Continue* button
-  does anything. Booking still needs `services.py` (§3–§5) and the POST routes
-  in §6. The party-size stepper remains inert.
+- **Selection is still not a hold.** Seats picked in the panel are reserved for
+  nobody until *Confirm booking* commits; another kiosk can take one in the
+  meantime, and the passenger finds out at commit. That is the §5 policy
+  working as designed, not a gap.
+- **A party is all-or-nothing.** If any seat in a multi-seat request was just
+  taken, the whole booking rolls back rather than partially succeeding —
+  serving two of three passengers and charging for it is worse than refusing.
+- **No `print_flight` command yet** — core requirement 1's literal "print"
+  (§2) is still unimplemented; the web seat map covers the display half.
+- **The party-size stepper remains inert.** Selection count and party size are
+  not yet connected.
+- **No cancellation.** A booking is immediate and final.
 - **`SEAT_FARE` is a flat placeholder** in settings so the panel can show a
   total. Real pricing belongs on `Flight` (or a fare class), which is a
   migration, not a config edit.
-- **No seat holds.** A booking is immediate and final; there is no cancellation
-  path. Both were scoped out deliberately.
+- **No seat holds.** Deliberately scoped out; see the selection note above.
 - **`DEBUG = True`** and no deployment target chosen.
 - **Second aircraft layout** would trigger the `Seat` → `Aircraft` migration in §1.

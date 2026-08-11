@@ -23,15 +23,18 @@
       </div>
 
       <div class="ml-auto flex items-center gap-5 text-sm">
+        <button
+          type="button"
+          data-action="first-available"
+          class="rounded-lg border border-slate-200 px-3 py-1.5 font-medium text-slate-600 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700"
+        >First available seat</button>
         <span class="flex items-center gap-2 text-slate-600">
           <span class="h-4 w-4 rounded border-2 border-slate-300 bg-white"></span> Available
         </span>
         <span class="flex items-center gap-2 text-slate-600">
           <span class="h-4 w-4 rounded border-2 border-slate-200 bg-slate-200"></span> Taken
         </span>
-        <span class="font-medium text-emerald-700">
-          {{ cabin.seats_available }} of {{ cabin.seats_total }} free
-        </span>
+        {% include "reservations/_seats_remaining.html" %}
       </div>
     </header>
 
@@ -100,7 +103,7 @@
         >&times;</button>
       </header>
 
-      <div class="flex-1 overflow-y-auto px-6 py-6">
+      <div id="panel-summary" class="flex-1 overflow-y-auto px-6 py-6">
         <p class="text-sm text-slate-500">
           {{ flight.number }} &middot; {{ flight.origin }} &rarr; {{ flight.destination }}
         </p>
@@ -128,14 +131,85 @@
         </p>
       </div>
 
-      <footer class="flex justify-end border-t border-slate-200 px-6 py-5">
+      <footer id="panel-summary-footer" class="flex justify-end border-t border-slate-200 px-6 py-5">
         <button
           type="button"
-          data-action="confirm"
+          data-action="continue"
           class="rounded-full bg-sky-600 px-8 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700"
         >Continue</button>
       </footer>
+
+      {% comment %}
+        Step two: a name per chosen seat. Fields are built by JS from the
+        current selection, keeping seat and passenger adjacent so the POST
+        pairs them in order.
+      {% endcomment %}
+      <form
+        id="panel-names"
+        hidden
+        class="flex flex-1 flex-col"
+        hx-post="{% url 'book-seat' flight.id %}"
+        hx-target="#seat-map"
+        hx-swap="outerHTML"
+      >
+        <div class="flex-1 overflow-y-auto px-6 py-6">
+          <p class="text-sm text-slate-500">Who is flying?</p>
+          <div id="passenger-fields" class="mt-5 space-y-4"></div>
+        </div>
+        <footer class="flex items-center justify-between border-t border-slate-200 px-6 py-5">
+          <button
+            type="button"
+            data-action="back"
+            class="rounded-full px-4 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100"
+          >&lsaquo; Back</button>
+          <button
+            type="submit"
+            class="rounded-full bg-sky-600 px-8 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700"
+          >Confirm booking</button>
+        </footer>
+      </form>
+
+      {# First available: no seat is chosen, so only a name is needed. #}
+      <form
+        id="panel-first"
+        hidden
+        class="flex flex-1 flex-col"
+        hx-post="{% url 'book-first' flight.id %}"
+        hx-target="#seat-map"
+        hx-swap="outerHTML"
+      >
+        <div class="flex-1 overflow-y-auto px-6 py-6">
+          <p class="text-sm text-slate-500">
+            The lowest-numbered free seat on {{ flight.number }} will be assigned.
+          </p>
+          <label class="mt-5 block">
+            <span class="text-xs font-medium uppercase tracking-wide text-slate-400">Passenger</span>
+            <input
+              type="text"
+              name="passenger"
+              required
+              autocomplete="off"
+              placeholder="Full name"
+              class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+            >
+          </label>
+        </div>
+        <footer class="flex items-center justify-between border-t border-slate-200 px-6 py-5">
+          <button
+            type="button"
+            data-action="back"
+            class="rounded-full px-4 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100"
+          >&lsaquo; Back</button>
+          <button
+            type="submit"
+            class="rounded-full bg-sky-600 px-8 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700"
+          >Assign a seat</button>
+        </footer>
+      </form>
     </aside>
+
+    {# Target for the out-of-band status banner returned by booking POSTs. #}
+    <div id="booking-status"></div>
   </main>
 {% endblock %}
 

@@ -72,7 +72,9 @@ uv run ars/manage.py runserver
 ```
 
 The flight list is served at http://127.0.0.1:8000/, and each flight opens a
-drag/pinch/scroll seat map at `/flights/<id>/`. The htmx/Tailwind smoke-test page
+drag/pinch/scroll seat map at `/flights/<id>/` where seats can be picked and
+booked. *First available seat* in the header assigns the lowest-numbered free
+seat instead. The htmx/Tailwind smoke-test page
 still lives at http://127.0.0.1:8000/htmx-demo/.
 
 If you run with `--noreload`, note that Django's cached template loader will not
