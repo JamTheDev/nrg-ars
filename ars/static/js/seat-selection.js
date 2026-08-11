@@ -146,13 +146,42 @@
     });
   }
 
+  /* Drop every seat, whatever step the panel is on.
+   *
+   * Not routed through toggle(): that refuses while the cabin is locked, and
+   * abandoning a half-typed booking is exactly when this has to work. */
+  function clearSelection() {
+    selected.forEach(function (designation) {
+      var button = seatButton(designation);
+      if (button) button.setAttribute('aria-pressed', 'false');
+    });
+    selected = [];
+    render();
+  }
+
+  /* The X discards. It is the way out of a booking that is already under way,
+   * so leaving the seats selected behind it would mean the passenger walks
+   * away and the next one finds someone else's party still on the map. Typed
+   * names go too -- the name fields are rebuilt from the selection each time
+   * Continue is pressed. */
   document.querySelectorAll('[data-panel="close"]').forEach(function (button) {
     button.addEventListener('click', function () {
+      clearSelection();
+
+      // Names are rebuilt from the selection on the way in, but clear them
+      // here too: a discarded booking should leave nothing of itself behind
+      // in the DOM for the next passenger.
+      if (fields) fields.replaceChildren();
+      var soloName = firstForm && firstForm.querySelector('input[name="passenger"]');
+      if (soloName) soloName.value = '';
+
       showStep('summary');
       closePanel();
     });
   });
 
+  /* Escape only dismisses. Losing a selection to a stray key press would be a
+   * poor trade for closing a panel that can simply be reopened. */
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') closePanel();
   });
