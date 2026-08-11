@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django_htmx',
     'assistant',
+    'reservations',
 ]
 
 MIDDLEWARE = [
@@ -132,6 +133,15 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 STATICFILES_DIRS = [BASE_DIR / 'static']
+
+
+# Cabin layout
+# Read once by the data migration that seeds the Seat catalog, never at request
+# time -- the seeded rows are the source of truth. See ARCHITECTURE.md section 1.
+
+CABIN_ROWS = 30
+
+CABIN_COLUMNS = 'ABCDEF'
 
 
 # Email
