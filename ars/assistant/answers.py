@@ -24,15 +24,8 @@ from django.utils import timezone
 from reservations import selectors
 from reservations.models import Flight
 
-from assistant import providers
+from assistant import prompts, providers
 from assistant.schema import SeatQuery, describe
-
-PHRASING_SYSTEM = """\
-You are a calm, friendly airline kiosk assistant.
-Answer the passenger in one or two short sentences, using ONLY the facts given.
-Never invent a number or a seat code. Do not add greetings or offers of help.
-Do not use markdown. Refer to seats the way the facts do, like 12A.\
-"""
 
 SEAT_CODE = re.compile(r'\b(\d{1,2})([A-Za-z])\b')
 NUMBER = re.compile(r'\d+')
@@ -131,7 +124,7 @@ def _phrase(facts: dict, plain: str) -> str:
     prompt = f'Facts:\n{lines}\n\nThe passenger asked about this flight. Answer them.'
 
     try:
-        reply = providers.write(PHRASING_SYSTEM, prompt)
+        reply = providers.write(prompts.PHRASING_SYSTEM, prompt)
     except providers.ProviderUnavailable:
         return plain
 

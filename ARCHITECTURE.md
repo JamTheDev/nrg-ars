@@ -482,6 +482,30 @@ omits keys it is unsure about, and it bounds the rows against `CABIN_ROWS`,
 because an unbounded one answered "near the front" with `max_row` in the
 trillions. See `docs/plans/08-natural-language-search.md` §3.2.
 
+### Step 0 — Screening, cheapest layer first
+
+Every message is screened before it is treated as a request
+(`assistant/safety.py`), in three layers:
+
+1. phrases with no innocent reading at a kiosk — "ignore your instructions",
+   "you are now…", pasted SQL — are refused outright, with no model call
+2. ordinary seat talk is allowed outright, which keeps a second of latency off
+   every normal query
+3. only what neither recognises is put to the model, which labels the **topic**
+   as seats, flight or other. Asked "is this unsafe?" the same model answered
+   yes to everything, including "window seat near the front"; asked what a
+   message is *about*, it sorts kiosk talk from everything else reliably.
+
+A refusal says only *"Uh-oh! I ran into something. Please try again."* — a
+screening message that explains itself is a tutorial for the next attempt. The
+check **fails open**: if Ollama is unreachable the message passes, because the
+real boundary is that the model cannot emit SQL, and a screening step that
+takes the kiosk down when Ollama restarts is worse than the attack.
+
+All model instructions live in `assistant/prompts.py`. Prompts are prose that
+behaves like code, and keeping them in one file means the guard can be read
+beside the extraction prompt it protects.
+
 ### Step 1b — Guards: the model invents claims nobody made
 
 Constrained decoding controls the *shape* of the answer, not its honesty. In
