@@ -25,6 +25,11 @@ SIDE_WORDS = {
     'right': r'\b(right|starboard)\b',
 }
 
+# The same closed-set trick for the two default row bands. The model reaches
+# for "up to row 10" on requests that never mentioned the front at all.
+FRONT_WORDS = r'\b(front|forward|nose|ahead|beginning)\b'
+BACK_WORDS = r'\b(back|rear|tail|behind|end)\b'
+
 # The examples matter as much as the rules: without them a small model answers
 # "near the front" with a row number in the trillions. See the plan doc.
 SYSTEM_PROMPT = """\
@@ -46,7 +51,9 @@ side: "left" or "right" ONLY when the passenger says so. Never infer it. \
 Facing forward, columns {first}-{mid_col} are the left side, \
 {next_col}-{last} the right.
 random: true when the passenger does not mind which of the matching seats they \
-get ("random", "any seat", "surprise me", "you pick"), otherwise false.
+get ("random", "any seat", "surprise me", "you pick"), otherwise false. random \
+never cancels a constraint: if they also say where they want to sit, keep the \
+rows and position AND set random true.
 Always output all six keys. Use null for anything the passenger did not ask for.
 Examples:
 "window near the front" -> \
@@ -65,6 +72,12 @@ Examples:
 {{"position":"window","min_row":{mid_start},"max_row":{mid_end},"toward":null,"side":null,"random":false}}
 "surprise me" -> \
 {{"position":null,"min_row":null,"max_row":null,"toward":null,"side":null,"random":true}}
+"random seat at the back of the plane" -> \
+{{"position":null,"min_row":{back},"max_row":null,"toward":null,"side":null,\
+"random":true}}
+"any window seat up front" -> \
+{{"position":"window","min_row":null,"max_row":{front},"toward":null,"side":null,\
+"random":true}}
 "anything" -> \
 {{"position":null,"min_row":null,"max_row":null,"toward":null,"side":null,"random":false}}
 "aisle seat on the right" -> \
@@ -100,7 +113,7 @@ def extract(prose: str) -> SeatQuery:
         return SeatQuery()
 
     raw = providers.extract_json(text, seat_query_json_schema(), system=system_prompt())
-    query = _drop_unsaid_side(_validate(raw), text)
+    query = _drop_unsaid_band(_drop_unsaid_side(_validate(raw), text), text)
 
     # Only ask the vocabulary index about phrasing the model made nothing of.
     # It costs an embedding call, so it is a fallback, not a step.
@@ -125,6 +138,37 @@ def _drop_unsaid_side(query: SeatQuery, prose: str) -> SeatQuery:
     if re.search(SIDE_WORDS[query.side], prose, re.IGNORECASE):
         return query
     return replace(query, side=None)
+
+
+def _drop_unsaid_band(query: SeatQuery, prose: str) -> SeatQuery:
+    """Refuse a front/back band the passenger never asked for.
+
+    Only the two defaults from the prompt are second-guessed, and only when
+    the passenger named no rows at all -- an explicit "rows 5 to 9" is theirs,
+    whatever words surround it.
+    """
+    if re.search(r'\d', prose):
+        return query
+
+    rows = settings.CABIN_ROWS
+    front_default = max(1, rows // 3)
+    back_default = rows - rows // 3 + 1
+
+    if (
+        query.max_row == front_default
+        and query.min_row is None
+        and not re.search(FRONT_WORDS, prose, re.IGNORECASE)
+    ):
+        query = replace(query, max_row=None)
+
+    if (
+        query.min_row == back_default
+        and query.max_row is None
+        and not re.search(BACK_WORDS, prose, re.IGNORECASE)
+    ):
+        query = replace(query, min_row=None)
+
+    return query
 
 
 def _clamp_row(value: object) -> int | None:

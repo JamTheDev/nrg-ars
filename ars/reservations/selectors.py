@@ -347,6 +347,18 @@ def search_seats(
 
     # Bounds say which seats qualify; these say which of them to offer first.
     if query.is_random:
+        # "a random seat at the back" is a random seat *at the back*. Shuffling
+        # the whole cabin answers only half the sentence, so when an end is
+        # named the draw is made from that third of it.
+        if query.toward:
+            third = max(1, settings.CABIN_ROWS // 3)
+            if query.toward == 'back':
+                in_band = [c for c in matches if c.seat.row > settings.CABIN_ROWS - third]
+            else:
+                in_band = [c for c in matches if c.seat.row <= third]
+            # Fall back to the wider set rather than refusing: a full rear
+            # third still means "somewhere at the back" to the passenger.
+            matches = in_band or matches
         (rng or random.Random()).shuffle(matches)
     elif query.toward == 'back':
         # Without this, "as far back as possible" returns the front-most seat

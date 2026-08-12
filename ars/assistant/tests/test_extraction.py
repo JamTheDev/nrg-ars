@@ -87,6 +87,29 @@ class ValidationTests(TestCase):
             extraction._drop_unsaid_side(SeatQuery(side='right'), 'alright anywhere').side
         )
 
+    def test_an_invented_front_band_is_dropped(self) -> None:
+        # The model reaches for "up to row 10" on requests that never
+        # mentioned the front.
+        query = extraction._drop_unsaid_band(
+            SeatQuery(position='window', max_row=10), 'random window seat on the left'
+        )
+        self.assertIsNone(query.max_row)
+
+    def test_a_band_the_passenger_asked_for_survives(self) -> None:
+        for prose in ['window near the front', 'seat at the nose end', 'up ahead please']:
+            with self.subTest(prose=prose):
+                query = extraction._drop_unsaid_band(SeatQuery(max_row=10), prose)
+                self.assertEqual(query.max_row, 10)
+
+    def test_an_invented_back_band_is_dropped(self) -> None:
+        query = extraction._drop_unsaid_band(SeatQuery(min_row=21), 'a window seat')
+        self.assertIsNone(query.min_row)
+
+    def test_explicit_rows_are_never_second_guessed(self) -> None:
+        # "rows 5 to 9" is the passenger's, whatever words surround it.
+        query = extraction._drop_unsaid_band(SeatQuery(min_row=21), 'seat in row 21')
+        self.assertEqual(query.min_row, 21)
+
     def test_invented_fields_do_not_survive(self) -> None:
         query = extraction._validate({'position': 'aisle', 'discount': 90, 'seat': '1A'})
         self.assertEqual(query, SeatQuery(position='aisle'))

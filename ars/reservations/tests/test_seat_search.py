@@ -88,6 +88,30 @@ class SearchSeatsTests(TestCase):
         self.assertTrue(all(d[-1] in 'AF' and int(d[:-1]) <= 5 for d in designations))
         self.assertNotEqual(designations, ['1A', '1F', '2A'])
 
+    def test_random_at_an_end_draws_only_from_that_end(self) -> None:
+        import random as random_module
+
+        # "a random seat at the back" is a random seat *at the back*.
+        query = SeatQuery(toward='back', is_random=True)
+        picked = selectors.search_seats(
+            self.flight, query, limit=8, rng=random_module.Random(3)
+        )
+        rows = [seat.row for seat in picked]
+
+        self.assertTrue(all(row > 20 for row in rows), rows)
+        self.assertGreater(len(set(rows)), 1)  # genuinely spread, not just row 30
+
+    def test_random_toward_the_front_draws_from_the_front(self) -> None:
+        import random as random_module
+
+        picked = selectors.search_seats(
+            self.flight,
+            SeatQuery(toward='front', is_random=True),
+            limit=8,
+            rng=random_module.Random(3),
+        )
+        self.assertTrue(all(seat.row <= 10 for seat in picked))
+
     def test_random_is_reproducible_for_a_given_seed(self) -> None:
         import random as random_module
 
