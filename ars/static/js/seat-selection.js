@@ -153,8 +153,15 @@
     });
   });
 
+  /* Escape steps back one thing at a time: out of the search box first, then
+   * out of the panel. */
   document.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape') closePanel();
+    if (event.key !== 'Escape') return;
+    if (barMode() === 'search') {
+      showBar('stepper');
+      return;
+    }
+    closePanel();
   });
 
   /* ---- Steps: summary -> name entry -> POST ---------------------------- */
@@ -236,6 +243,37 @@
   document.querySelectorAll('[data-action="back"]').forEach(function (button) {
     button.addEventListener('click', function () {
       showStep('summary');
+    });
+  });
+
+  /* ---- The reserve bar has two modes ----------------------------------
+   *
+   * Count the party by hand, or describe what you want. Same bar, same
+   * endpoint underneath; the chat button swaps which one is showing and the
+   * back arrow returns.
+   */
+
+  var barStepper = document.getElementById('bar-stepper');
+  var barSearch = document.getElementById('bar-search');
+
+  function showBar(mode) {
+    if (!barStepper || !barSearch) return;
+    barStepper.hidden = mode !== 'stepper';
+    barSearch.hidden = mode !== 'search';
+
+    if (mode === 'search') {
+      var input = barSearch.querySelector('input[name="q"]');
+      if (input) input.focus();
+    }
+  }
+
+  function barMode() {
+    return barSearch && !barSearch.hidden ? 'search' : 'stepper';
+  }
+
+  document.querySelectorAll('[data-bar]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      showBar(button.dataset.bar);
     });
   });
 

@@ -18,12 +18,16 @@ than a pull request description.
 | [Seat selection and reservation panel](04-seat-selection-panel.md) | as-built | `e113ffd`, PR #3 |
 | [Booking flow](05-booking-flow.md) | as-built | `aed1ca1`, PR #4 |
 | [Party-size auto selection](06-party-size-auto-select.md) | built | `502604f`–`a8043ef`, PR #8 |
-| [`print_flight`, the literal print](07-print-flight.md) | **proposed** | — |
-| [Natural-language seat search](08-natural-language-search.md) | **proposed** | — |
+| [`print_flight`, the literal print](07-print-flight.md) | built | `4a1cdc0`, PR #11 |
+| [Natural-language seat search](08-natural-language-search.md) | built | PR #12 — includes a log of everything that went wrong |
 
-Together, 07 and 08 are what stands between this project and feature complete:
-07 closes the half of core requirement 1 that the web seat map does not cover,
-and 08 builds the feature ARCHITECTURE.md §7 designs but nothing implements.
+All three core requirements are implemented, and so is the natural-language
+search ARCHITECTURE.md §7 designs.
+
+**Start with [08](08-natural-language-search.md) if you are touching the
+language side.** Its problem log is the only record of why the prompt, the JSON
+schema and the guards look the way they do — most of it was learned by the
+feature being confidently wrong.
 
 ARCHITECTURE.md remains the reference for how the system works today. These
 documents explain *why it is that way*, including the options that were rejected.
