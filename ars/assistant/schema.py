@@ -16,7 +16,7 @@ Toward = Literal['front', 'back']
 Side = Literal['left', 'right']
 # What the passenger wants done. "How many window seats are there?" and "give
 # me a window seat" describe the same seats and want opposite things back.
-Intent = Literal['find', 'count', 'status']
+Intent = Literal['find', 'count', 'list', 'status']
 
 
 @dataclass(frozen=True)
@@ -151,7 +151,7 @@ def seat_query_json_schema() -> dict:
             },
             'intent': {
                 'type': 'string',
-                'enum': ['find', 'count', 'status'],
+                'enum': ['find', 'count', 'list', 'status'],
             },
             'together': {'type': 'boolean'},
             'random': {'type': 'boolean'},

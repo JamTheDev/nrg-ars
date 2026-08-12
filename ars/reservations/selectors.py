@@ -338,15 +338,21 @@ def _matches(cell: SeatCell, query, columns, side) -> bool:
 
 @dataclass(frozen=True)
 class SeatCounts:
-    """How many seats a filter describes, and how many of those are free.
+    """What a filter describes: how many seats, which, and how many are free.
 
-    Answering "how many window seats are there?" needs both numbers: the
+    Answering "how many window seats are there?" needs both numbers -- the
     cabin's shape and today's availability are different questions, and a bot
-    that conflates them is wrong twice a day.
+    that conflates them is wrong twice a day. Answering "*which* seats" needs
+    the extent as well, which is why the ends and the columns come along.
     """
 
     matching: int
     free: int
+    first: str | None = None
+    last: str | None = None
+    first_row: int | None = None
+    last_row: int | None = None
+    columns: tuple[str, ...] = ()
 
     @property
     def taken(self) -> int:
@@ -365,9 +371,15 @@ def count_seats(flight: Flight, query) -> SeatCounts:
         for cell in row.cells
         if _matches(cell, query, columns, side)
     ]
+    ordered = _cabin_order(cells)
     return SeatCounts(
-        matching=len(cells),
-        free=sum(1 for cell in cells if not cell.is_taken),
+        matching=len(ordered),
+        free=sum(1 for cell in ordered if not cell.is_taken),
+        first=ordered[0].designation if ordered else None,
+        last=ordered[-1].designation if ordered else None,
+        first_row=ordered[0].seat.row if ordered else None,
+        last_row=ordered[-1].seat.row if ordered else None,
+        columns=tuple(sorted({cell.seat.column for cell in ordered})),
     )
 
 

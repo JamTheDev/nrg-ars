@@ -44,6 +44,18 @@ POSITION_WORDS = (
 
 # Questions look like questions. The model muddles "how many window seats are
 # there?" with "give me a window seat" often enough to check the words.
+# "what seats are in the middle section" wants the seats named, not counted.
+# "the middle section" is a place in the cabin; "a middle seat" is a seat type.
+# The model collapses them however the prompt is worded, so the distinction is
+# enforced here.
+MIDDLE_SECTION = (
+    r'\bmiddle\s+(section|part|third)\b'
+    r'|\b(middle|centre|center)\s+of\s+the\s+(plane|aircraft|cabin)\b'
+    r'|\bhalfway\s+down\b'
+)
+
+LIST_WORDS = r'\b(what|which|list|show me|name)\b[^?]*\bseats?\b'
+
 QUESTION_WORDS = (
     r'(\?|\b(how many|how much|how full|what|when|where|which|is there|are there'
     r'|do you have|any left|status|available)\b)'
@@ -64,16 +76,16 @@ COUNT_WORDS = (
 SYSTEM_PROMPT = """\
 Convert what a passenger says into filters for a cabin of {rows} rows, \
 columns {first}-{last}.
-intent: "count" when they are asking how many seats there are ("how many window \
-seats are there?", "any aisle seats left?"), "status" when they ask about the \
-flight itself ("is it full?", "when does it leave?"), otherwise "find", which \
-means pick seats for them.
+intent: "count" for how many ("how many window seats are there?"), "list" for \
+which ones ("what seats are in the middle section?"), "status" for the flight \
+itself ("is it full?", "when does it leave?"), otherwise "find", which means \
+pick seats for them.
 Row 1 is the front, row {rows} is the back.
 position: "window", "aisle", "middle", or null. "middle" means a seat with a \
 passenger on each side. It does NOT mean the centre of the aircraft.
-"the middle of the plane", "the centre of the cabin", "halfway down" describe \
-rows, not a seat type: min_row {mid_start}, max_row {mid_end}, and position \
-stays null unless a seat type is also named.
+"the middle of the plane", "the middle section", "the centre of the cabin", \
+"halfway down" describe rows, not a seat type: min_row {mid_start}, \
+max_row {mid_end}, and position stays null unless a seat type is also named.
 min_row/max_row: integers 1-{rows}, or null. Set both only for an explicit row \
 or range, like "row 12" or "rows 5 to 9".
 "front" means max_row {front}. "back" means min_row {back}.
@@ -175,6 +187,7 @@ def extract(prose: str) -> SeatQuery:
     query = _drop_unsaid_position(query, text)
     query = _drop_unsaid_together(query, text)
     query = _settle_intent(query, text)
+    query = _middle_means_rows(query, text)
     query = _drop_unsaid_party(query, text)
 
     # Only ask the vocabulary index about phrasing the model made nothing of.
@@ -202,6 +215,20 @@ def _drop_unsaid_side(query: SeatQuery, prose: str) -> SeatQuery:
     return replace(query, side=None)
 
 
+def _middle_means_rows(query: SeatQuery, prose: str) -> SeatQuery:
+    """"The middle section" is a place, not a seat type."""
+    if not re.search(MIDDLE_SECTION, prose, re.IGNORECASE):
+        return query
+
+    rows = settings.CABIN_ROWS
+    changes = {}
+    if query.position == 'middle':
+        changes['position'] = None
+    if query.min_row is None and query.max_row is None:
+        changes |= {'min_row': rows // 3 + 1, 'max_row': rows - rows // 3}
+    return replace(query, **changes) if changes else query
+
+
 def _settle_intent(query: SeatQuery, prose: str) -> SeatQuery:
     """Decide question from request by how it was phrased.
 
@@ -211,10 +238,13 @@ def _settle_intent(query: SeatQuery, prose: str) -> SeatQuery:
     are a better signal than the model's own classification.
     """
     asked = re.search(QUESTION_WORDS, prose, re.IGNORECASE) is not None
+    wants_names = re.search(LIST_WORDS, prose, re.IGNORECASE) is not None
 
+    if wants_names:
+        return replace(query, intent='list')
     if asked and query.intent == 'find':
         return replace(query, intent='count')
-    if not asked and query.intent in ('count', 'status'):
+    if not asked and query.intent in ('count', 'list', 'status'):
         return replace(query, intent='find')
     return query
 
@@ -317,7 +347,7 @@ def _validate(raw: dict) -> SeatQuery:
     bounded it -- must not reach the ORM as a filter that matches everything.
     """
     intent = raw.get('intent')
-    if intent not in ('find', 'count', 'status'):
+    if intent not in ('find', 'count', 'list', 'status'):
         intent = 'find'
 
     position = raw.get('position')

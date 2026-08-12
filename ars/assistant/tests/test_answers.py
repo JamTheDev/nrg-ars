@@ -130,3 +130,71 @@ class IntentTests(TestCase):
         self.assertEqual(
             answers.answer(flight, query), 'All 60 window seats on PR205 are free.'
         )
+
+
+class PhrasingGuardTests(TestCase):
+    """The model writes the sentence; it does not get to choose the numbers."""
+
+    def setUp(self) -> None:
+        self.facts = {
+            'flight': 'PR101',
+            'seats_matching': 60,
+            'seats_free': 58,
+            'first_seat': '11A',
+            'last_seat': '20F',
+            'rows': '11 to 20',
+        }
+
+    def test_a_reply_using_our_numbers_is_kept(self) -> None:
+        self.assertTrue(
+            answers._is_grounded('Rows 11 to 20 hold 60 seats, 58 free — 11A to 20F.', self.facts)
+        )
+
+    def test_an_invented_count_is_rejected(self) -> None:
+        self.assertFalse(answers._is_grounded('There are 42 seats free.', self.facts))
+
+    def test_a_seat_outside_the_range_is_rejected(self) -> None:
+        self.assertFalse(answers._is_grounded('Try 27C, it is lovely.', self.facts))
+
+    def test_a_row_inside_the_range_is_allowed(self) -> None:
+        # Naming row 14 of rows 11-20 is a true statement.
+        self.assertTrue(answers._is_grounded('Row 14 is in that section.', self.facts))
+
+    def test_the_plain_sentence_is_used_when_the_model_drifts(self) -> None:
+        flight = Flight.objects.create(
+            number='PR900',
+            origin='MNL',
+            destination='CEB',
+            departs_at=timezone.now() + timedelta(hours=5),
+        )
+        with mock.patch.object(answers.providers, 'write', return_value='About 42 seats, I think.'):
+            reply = answers.answer(flight, SeatQuery(intent='count', position='window'))
+
+        self.assertEqual(reply, 'All 60 window seats on PR900 are free.')
+
+    def test_the_plain_sentence_is_used_when_the_model_is_down(self) -> None:
+        flight = Flight.objects.create(
+            number='PR901',
+            origin='MNL',
+            destination='CEB',
+            departs_at=timezone.now() + timedelta(hours=5),
+        )
+        with mock.patch.object(
+            answers.providers, 'write', side_effect=answers.providers.ProviderUnavailable('down')
+        ):
+            reply = answers.answer(flight, SeatQuery(intent='count'))
+
+        self.assertEqual(reply, 'PR901 has 180 of 180 seats free.')
+
+
+class MiddleSectionTests(TestCase):
+    def test_the_middle_section_is_a_place_not_a_seat_type(self) -> None:
+        query = extraction._middle_means_rows(
+            SeatQuery(position='middle'), 'what seats are in the middle section'
+        )
+        self.assertIsNone(query.position)
+        self.assertEqual((query.min_row, query.max_row), (11, 20))
+
+    def test_a_middle_seat_stays_a_seat_type(self) -> None:
+        query = extraction._middle_means_rows(SeatQuery(position='middle'), 'i want a middle seat')
+        self.assertEqual(query.position, 'middle')

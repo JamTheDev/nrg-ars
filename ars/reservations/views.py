@@ -92,7 +92,7 @@ def _search_response(
 
     # A question wants an answer, not a selection. Every number in the reply
     # is counted from the database; the model only says what to count.
-    if query.intent in ('count', 'status'):
+    if query.intent in ('count', 'list', 'status'):
         return _booking_response(
             request,
             flight,
