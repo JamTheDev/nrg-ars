@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+{% load static assets %}
+
+{% block title %}{{ flight.number }} &middot; seat map{% endblock %}
+
+{% block content %}
+  <main class="flex h-screen flex-col bg-slate-50 font-sans">
+
+    <header class="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-slate-200 bg-white px-6 py-4">
+      <a
+        href="{% url 'flight-list' %}"
+        class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+      >&lsaquo; Flights</a>
+
+      <div>
+        <p class="font-mono text-lg font-semibold tracking-wide text-slate-900">
+          {{ flight.number }}
+          <span class="ml-2 text-slate-500">{{ flight.origin }} &rarr; {{ flight.destination }}</span>
+        </p>
+        <p class="text-sm text-slate-500">
+          {{ flight.departs_at|date:"D, d M Y" }} at {{ flight.departs_at|date:"H:i" }}
+        </p>
+      </div>
+
+      <div class="ml-auto flex items-center gap-5 text-sm">
+        <button
+          type="button"
+          data-action="first-available"
+          class="rounded-lg border border-slate-200 px-3 py-1.5 font-medium text-slate-600 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700"
+        >First available seat</button>
+        <span class="flex items-center gap-2 text-slate-600">
+          <span class="h-4 w-4 rounded border-2 border-slate-300 bg-white"></span> Available
+        </span>
+        <span class="flex items-center gap-2 text-slate-600">
+          <span class="h-4 w-4 rounded border-2 border-slate-200 bg-slate-200"></span> Taken
+        </span>
+        {% include "reservations/_seats_remaining.html" %}
+      </div>
+    </header>
+
+    {% comment %}
+      Pan/zoom viewport. The transform is applied to #seat-map-canvas, so an
+      htmx swap of #seat-map inside it leaves the camera untouched.
+    {% endcomment %}
+    <div
+      id="seat-map-viewport"
+      class="relative flex-1 cursor-grab touch-none select-none overflow-hidden"
+    >
+      <div id="seat-map-canvas" class="absolute left-0 top-0 origin-top-left">
+        {% include "reservations/_seat_map.html" %}
+      </div>
+
+      <div
+        id="map-controls"
+        class="absolute right-5 top-5 flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
+      >
+        <button type="button" data-zoom="in" class="h-10 w-10 text-lg text-slate-600 transition hover:bg-slate-100" aria-label="Zoom in">+</button>
+        <button type="button" data-zoom="out" class="h-10 w-10 border-y border-slate-200 text-lg text-slate-600 transition hover:bg-slate-100" aria-label="Zoom out">&minus;</button>
+        <button type="button" data-zoom="fit" class="h-10 w-10 text-sm text-slate-600 transition hover:bg-slate-100" aria-label="Fit to screen">&#9634;</button>
+      </div>
+
+      <p class="pointer-events-none absolute bottom-5 left-5 text-xs text-slate-400">
+        Drag to pan &middot; pinch or scroll to zoom &middot; double-tap to zoom in
+      </p>
+    </div>
+
+    {% comment %}
+      Reserve bar. The stepper shows how many seats are selected: raising it
+      asks the server for another seat beside the party, lowering it drops the
+      most recent pick here in the page.
+    {% endcomment %}
+    <div id="reserve-bar-wrap" class="pointer-events-none fixed inset-x-0 bottom-6 z-20 flex flex-col items-center gap-2 px-4">
+      <p
+        id="party-limit-note"
+        hidden
+        role="status"
+        class="rounded-full bg-slate-900 px-4 py-1.5 text-xs font-medium text-white shadow-lg"
+      >Up to {{ max_party_size }} seats per booking.</p>
+
+      <div class="pointer-events-auto flex items-center gap-4 rounded-full border border-slate-200 bg-white/95 py-2 pl-5 pr-2 shadow-lg backdrop-blur">
+
+        {# Mode one: count the party by hand. #}
+        <div id="bar-stepper" class="flex items-center gap-4">
+          <span class="text-sm text-slate-500">Reserve for&hellip;</span>
+
+          <div class="flex items-center gap-1">
+            <button type="button" data-party="decrement" class="h-8 w-8 rounded-full text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent" aria-label="Fewer passengers">&lsaquo;</button>
+            <span data-party="count" aria-live="polite" class="w-8 text-center font-mono text-base font-semibold text-slate-900">0</span>
+            <button type="button" data-party="increment" class="h-8 w-8 rounded-full text-slate-500 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent" aria-label="More passengers">&rsaquo;</button>
+          </div>
+
+          <button
+            type="button"
+            data-action="continue"
+            class="rounded-full bg-sky-600 px-6 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
+          >Continue</button>
+
+          <button
+            type="button"
+            data-bar="search"
+            title="Describe the seat you want"
+            aria-label="Switch to describing the seat you want"
+            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:border-sky-300 hover:bg-sky-50 hover:text-sky-600"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-5 w-5" aria-hidden="true">
+              <path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-6.5A8 8 0 0 1 11 4h2a8 8 0 0 1 8 8Z" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+
+        {% comment %}
+          Mode two: say it instead. Same seat-map endpoint as the stepper, so
+          the answer arrives as a selection and the camera flies to it.
+        {% endcomment %}
+        <form
+          id="bar-search"
+          hidden
+          class="flex items-center gap-2"
+          hx-get="{% url 'seat-map' flight.id %}"
+          hx-target="#seat-map"
+          hx-swap="outerHTML"
+        >
+          <button
+            type="button"
+            data-bar="stepper"
+            title="Back to the passenger count"
+            aria-label="Back to the passenger count"
+            class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+          >&lsaquo;</button>
+
+          <label class="relative block">
+            <span class="sr-only">Describe the seat you want</span>
+            <input
+              type="search"
+              name="q"
+              autocomplete="off"
+              placeholder="window seats for 6 people&hellip;"
+              class="w-80 rounded-full border border-slate-200 py-2 pl-4 pr-10 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+            >
+          </label>
+
+          <button
+            type="submit"
+            class="flex min-w-28 items-center justify-center gap-2 rounded-full bg-sky-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
+          >
+            <span class="search-idle">Find</span>
+            <span class="search-busy items-center gap-2">
+              <svg viewBox="0 0 24 24" fill="none" class="spinner h-4 w-4" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-opacity="0.3" stroke-width="3"/>
+                <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+              </svg>
+              Searching&hellip;
+            </span>
+          </button>
+        </form>
+      </div>
+    </div>
+
+    {% comment %}
+      Reservation summary. Opens on the first seat selection or on Continue --
+      those triggers and the booking itself are still to be decided.
+    {% endcomment %}
+    <aside
+      id="reserve-panel"
+      class="fixed inset-y-0 right-0 z-30 flex w-96 flex-col border-l border-slate-200 bg-white shadow-2xl"
+      data-open="false"
+      data-fare="{{ seat_fare }}"
+      data-currency="{{ currency_symbol }}"
+      data-max-party="{{ max_party_size }}"
+      data-map-url="{% url 'seat-map' flight.id %}"
+      aria-hidden="true"
+      aria-label="Reservation summary"
+    >
+      <header class="flex items-center justify-between border-b border-slate-200 px-6 py-5">
+        <p class="text-lg font-semibold tracking-tight text-slate-900">PlaneServe</p>
+        <button
+          type="button"
+          data-panel="close"
+          class="h-8 w-8 rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+          aria-label="Close reservation summary"
+        >&times;</button>
+      </header>
+
+      <div id="panel-summary" class="flex-1 overflow-y-auto px-6 py-6">
+        <p class="text-sm text-slate-500">
+          {{ flight.number }} &middot; {{ flight.origin }} &rarr; {{ flight.destination }}
+        </p>
+
+        <div class="mt-6 flex items-start gap-3">
+          <span class="text-slate-600">Seats</span>
+          <span class="mt-3 flex-1 border-b border-dotted border-slate-300"></span>
+          <div id="reserve-seats" class="flex max-w-48 flex-wrap justify-end gap-2"></div>
+        </div>
+
+        <p id="reserve-empty" class="mt-4 text-right text-sm text-slate-400">
+          No seats selected yet.
+        </p>
+
+        <div class="mt-8 flex items-baseline gap-3">
+          <span class="text-slate-600">Total</span>
+          <span class="flex-1 border-b border-dotted border-slate-300"></span>
+          <span id="reserve-total" class="font-mono text-xl font-semibold text-slate-900">
+            {{ currency_symbol }}0
+          </span>
+        </div>
+
+        <p class="mt-2 text-right text-xs text-slate-400">
+          {{ currency_symbol }}{{ seat_fare }} per seat
+        </p>
+      </div>
+
+      <footer id="panel-summary-footer" class="flex justify-end border-t border-slate-200 px-6 py-5">
+        <button
+          type="button"
+          data-action="continue"
+          class="rounded-full bg-sky-600 px-8 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700"
+        >Continue</button>
+      </footer>
+
+      {% comment %}
+        Step two: a name per chosen seat. Fields are built by JS from the
+        current selection, keeping seat and passenger adjacent so the POST
+        pairs them in order.
+      {% endcomment %}
+      <form
+        id="panel-names"
+        hidden
+        class="flex flex-1 flex-col"
+        hx-post="{% url 'book-seat' flight.id %}"
+        hx-target="#seat-map"
+        hx-swap="outerHTML"
+      >
+        <div class="flex-1 overflow-y-auto px-6 py-6">
+          <p class="text-sm text-slate-500">Who is flying?</p>
+          <div id="passenger-fields" class="mt-5 space-y-4"></div>
+        </div>
+        <footer class="flex items-center justify-between border-t border-slate-200 px-6 py-5">
+          <button
+            type="button"
+            data-action="back"
+            class="rounded-full px-4 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100"
+          >&lsaquo; Back</button>
+          <button
+            type="submit"
+            class="rounded-full bg-sky-600 px-8 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700"
+          >Confirm booking</button>
+        </footer>
+      </form>
+
+      {# First available: no seat is chosen, so only a name is needed. #}
+      <form
+        id="panel-first"
+        hidden
+        class="flex flex-1 flex-col"
+        hx-post="{% url 'book-first' flight.id %}"
+        hx-target="#seat-map"
+        hx-swap="outerHTML"
+      >
+        <div class="flex-1 overflow-y-auto px-6 py-6">
+          <p class="text-sm text-slate-500">
+            The lowest-numbered free seat on {{ flight.number }} will be assigned.
+          </p>
+          <label class="mt-5 block">
+            <span class="text-xs font-medium uppercase tracking-wide text-slate-400">Passenger</span>
+            <input
+              type="text"
+              name="passenger"
+              required
+              autocomplete="off"
+              placeholder="Full name"
+              class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200"
+            >
+          </label>
+        </div>
+        <footer class="flex items-center justify-between border-t border-slate-200 px-6 py-5">
+          <button
+            type="button"
+            data-action="back"
+            class="rounded-full px-4 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100"
+          >&lsaquo; Back</button>
+          <button
+            type="submit"
+            class="rounded-full bg-sky-600 px-8 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700"
+          >Assign a seat</button>
+        </footer>
+      </form>
+    </aside>
+
+    {# Target for the out-of-band status banner returned by booking POSTs. #}
+    <div id="booking-status"></div>
+  </main>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{% versioned_static 'js/seatmap.js' %}" defer></script>
+  <script src="{% versioned_static 'js/seat-selection.js' %}" defer></script>
+{% endblock %}

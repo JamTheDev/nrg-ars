@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Flights{% endblock %}
+
+{% block content %}
+  <main class="mx-auto max-w-4xl px-6 py-10 font-sans">
+    <header class="border-b border-slate-200 pb-6">
+      <h1 class="text-3xl font-bold tracking-tight text-slate-900">Departures</h1>
+      <p class="mt-2 text-sm text-slate-500">
+        Choose a flight to view its seat map and book a seat.
+      </p>
+    </header>
+
+    <ul id="flight-list" class="mt-6 space-y-3">
+      {% for row in rows %}
+        <li>
+          {# An <a> with no href is inert: the right shape for an unbookable flight. #}
+          <a
+            {% if row.has_departed or row.is_full %}
+              aria-disabled="true"
+            {% else %}
+              href="{% url 'flight-detail' row.flight.id %}"
+            {% endif %}
+            class="group flex w-full flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border border-slate-200 bg-white p-5 text-left transition
+                   {% if row.has_departed or row.is_full %}
+                     cursor-not-allowed opacity-60
+                   {% else %}
+                     cursor-pointer hover:-translate-y-0.5 hover:border-sky-300 hover:bg-sky-50/60 hover:shadow-md
+                     focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600
+                   {% endif %}"
+          >
+            <div class="w-24 shrink-0">
+              <span class="rounded bg-slate-900 px-2.5 py-1 font-mono text-sm font-semibold text-white transition group-hover:bg-sky-700">
+                {{ row.flight.number }}
+              </span>
+            </div>
+
+            <div class="min-w-56 grow">
+              <p class="font-mono text-lg font-semibold tracking-wide text-slate-900">
+                {{ row.flight.origin }} <span class="text-slate-400">&rarr;</span> {{ row.flight.destination }}
+              </p>
+              <p class="text-sm text-slate-500">
+                {{ row.flight.departs_at|date:"D, d M Y" }} at {{ row.flight.departs_at|date:"H:i" }}
+              </p>
+            </div>
+
+            <div class="text-right">
+              {% if row.has_departed %}
+                <p class="text-sm font-medium text-slate-400">Departed</p>
+              {% elif row.is_full %}
+                <p class="text-sm font-medium text-rose-600">Full</p>
+              {% else %}
+                <p class="text-sm font-medium text-emerald-700">
+                  {{ row.seats_available }} seat{{ row.seats_available|pluralize }} left
+                </p>
+              {% endif %}
+              <p class="text-xs text-slate-400">of {{ row.seats_total }}</p>
+            </div>
+
+            <span
+              aria-hidden="true"
+              class="text-xl text-slate-300 transition group-hover:translate-x-1 group-hover:text-sky-600"
+            >&rsaquo;</span>
+          </a>
+        </li>
+      {% empty %}
+        <li class="py-16 text-center">
+          <p class="text-slate-500">No flights are scheduled.</p>
+          <p class="mt-1 text-sm text-slate-400">
+            Add one in the admin, or run
+            <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-slate-600">
+              uv run ars/manage.py seed_flights
+            </code>
+          </p>
+        </li>
+      {% endfor %}
+    </ul>
+  </main>
+{% endblock %}

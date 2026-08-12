@@ -2,3 +2,143 @@
 
 /* Scan Django templates for utility classes. */
 @source "../../templates";
+
+/*
+ * State that JavaScript toggles lives here rather than as Tailwind classes
+ * swapped from JS: Tailwind only compiles classes it can see in the templates,
+ * so a class that exists only inside a .js file would silently produce no CSS.
+ */
+
+/* A selected seat. Toggled via aria-pressed, which is also what a screen
+   reader announces. */
+.seat[aria-pressed="true"] {
+  border-color: var(--color-emerald-600);
+  background-color: var(--color-emerald-400);
+  color: var(--color-emerald-950);
+}
+
+/* Small popups: the booking banner and the party-limit note.
+   Both appear abruptly enough to be missed, so they drop in and fade. */
+
+@keyframes popup-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.5rem) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The banner arrives as a fresh element on every out-of-band swap, so an
+   animation runs on insertion without any JavaScript. */
+#booking-status > * {
+  animation: popup-in 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* The limit note is toggled in place, so it transitions rather than animates:
+   it has to be able to leave as well as arrive. */
+#party-limit-note {
+  opacity: 0;
+  transform: translateY(0.5rem) scale(0.96);
+  transition: opacity 180ms ease, transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#party-limit-note[data-visible="true"] {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #booking-status > *,
+  #party-limit-note,
+  #reserve-panel {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* While a booking is being confirmed the cabin is frozen: the seats being
+   named must not change underneath the passenger. Unselected seats grey out,
+   and no seat responds to a tap. Panning and zooming still work, so they can
+   look around while typing. */
+#seat-map-viewport[data-locked="true"] .seat {
+  pointer-events: none;
+}
+
+#seat-map-viewport[data-locked="true"] .seat:not([aria-pressed="true"]) {
+  opacity: 0.3;
+}
+
+/* The search button's loading state. htmx adds .htmx-request to the element
+   making the request, and that class only ever exists at runtime -- Tailwind
+   cannot see it, so the rules live here. A local model takes a second or two,
+   and longer on the first query after an idle period while Ollama loads it. */
+.search-busy {
+  display: none;
+}
+
+#bar-search.htmx-request .search-idle {
+  display: none;
+}
+
+#bar-search.htmx-request .search-busy {
+  display: inline-flex;
+}
+
+#bar-search.htmx-request button[type="submit"] {
+  cursor: progress;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+#bar-search.htmx-request input[name="q"] {
+  color: var(--color-slate-400);
+}
+
+.spinner {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
+
+/* Reservation side panel: off-canvas until data-open. */
+#reserve-panel {
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+}
+
+#reserve-panel[data-open="true"] {
+  transform: translateX(0);
+}
+
+/* The zoom controls live at the top right of the map, which is exactly where
+   the panel opens over them. Slide them clear, or they cannot be reached while
+   a selection is being reviewed. */
+#map-controls {
+  transition: transform 0.3s ease;
+}
+
+#map-controls[data-panel-open="true"] {
+  transform: translateX(-24rem);
+}
+
+/* Keep the reserve bar centred in the space the panel leaves behind. */
+#reserve-bar-wrap {
+  transition: padding-right 0.3s ease;
+}
+
+#reserve-bar-wrap[data-panel-open="true"] {
+  padding-right: 24rem;
+}

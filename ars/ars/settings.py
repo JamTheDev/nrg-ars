@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
+from decimal import Decimal
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -51,6 +52,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django_htmx',
     'assistant',
+    'reservations',
 ]
 
 MIDDLEWARE = [
@@ -91,6 +93,13 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        # WAL lets the seat map be read while a booking is being written, and
+        # the busy timeout absorbs brief write contention instead of failing
+        # instantly. See ARCHITECTURE.md section 5.
+        'OPTIONS': {
+            'init_command': 'PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;',
+            'timeout': 20,
+        },
     }
 }
 
@@ -119,7 +128,8 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+# The kiosk stands in Manila; times are stored UTC and shown local.
+TIME_ZONE = 'Asia/Manila'
 
 USE_I18N = True
 
@@ -132,6 +142,36 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 STATICFILES_DIRS = [BASE_DIR / 'static']
+
+
+# Cabin layout
+# Read once by the data migration that seeds the Seat catalog, never at request
+# time -- the seeded rows are the source of truth. See ARCHITECTURE.md section 1.
+
+CABIN_ROWS = 30
+
+CABIN_COLUMNS = 'ABCDEF'
+
+# Largest party the stepper will auto-seat. One full row: beyond this even
+# "everyone in the same row" cannot hold the party, so the pick is guaranteed
+# to scatter and is better handled as separate bookings.
+MAX_PARTY_SIZE = 6
+
+
+# Natural-language search
+# The assistant talks to a local Ollama server. Override the host for a server
+# on another machine; the models themselves live in assistant/providers.py.
+
+OLLAMA_HOST = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
+
+
+# Fares
+# Placeholder flat pricing so the reservation panel can show a total. A real
+# per-flight fare belongs on Flight once booking is implemented.
+
+SEAT_FARE = Decimal('50.00')
+
+CURRENCY_SYMBOL = '$'
 
 
 # Email
