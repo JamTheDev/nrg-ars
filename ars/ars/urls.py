@@ -17,11 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
-from ars import views
-
 urlpatterns = [
     path('', include('reservations.urls')),
     path('admin/', admin.site.urls),
-    path('htmx-demo/', views.htmx_demo, name='htmx-demo'),
-    path('htmx-demo/ping/', views.htmx_demo_ping, name='htmx-demo-ping'),
 ]

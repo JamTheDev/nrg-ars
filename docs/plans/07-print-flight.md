@@ -1,6 +1,6 @@
 # Plan — `print_flight`, the literal print
 
-Status: **proposed**, not started.
+Status: **built**, PR #11.
 Target branch: `feature/print-flight` → PR into `dev`.
 
 Closes the half of core requirement 1 that the web seat map does not cover.
@@ -137,13 +137,12 @@ Half a day at most, and it is the last thing standing between this project and
 
 ---
 
-## 6. Open questions
+## 6. How they were settled
 
-1. **Departure time zone.** `USE_TZ = True` and `TIME_ZONE = 'UTC'`, so the
-   command prints UTC. For a kiosk in Manila that is arguably wrong, but
-   changing it is a settings decision affecting the web views too. Proposal:
-   print UTC now, and open a separate question about `TIME_ZONE`.
-2. **Colour.** `self.style.SUCCESS`/`ERROR` could tint free and taken seats.
-   Proposal: no. It breaks when piped, and `.`/`X` already reads fine.
-3. **Should it accept a flight id as well as a number?** Proposal: no. One way
-   to name a thing is simpler to document.
+- **Times print in the kiosk's own zone**, `Asia/Manila`, matching every other
+  surface. Stored values stay UTC.
+- **No colour.** `.` and `X` read fine, and colour breaks when piped.
+- **Flights are named by number only.** One way to name a thing is simpler to
+  document than two.
+- **Three queries, not two.** The cabin costs two; finding the flight is a
+  third, unavoidably. The test asserts three and says why.

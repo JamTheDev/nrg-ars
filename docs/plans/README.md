@@ -17,9 +17,9 @@ than a pull request description.
 | [Seat map and kiosk camera](03-seat-map-kiosk-camera.md) | as-built | `e113ffd` + `4b4002a`, PRs #3 and #4 |
 | [Seat selection and reservation panel](04-seat-selection-panel.md) | as-built | `e113ffd`, PR #3 |
 | [Booking flow](05-booking-flow.md) | as-built | `aed1ca1`, PR #4 |
-| [Party-size auto selection](06-party-size-auto-select.md) | built | `502604f`–`a8043ef`, PR #8 |
-| [`print_flight`, the literal print](07-print-flight.md) | built | `4a1cdc0`, PR #11 |
-| [Natural-language seat search](08-natural-language-search.md) | built | PR #12 — includes a log of everything that went wrong |
+| [Party-size auto selection](06-party-size-auto-select.md) | built | PR #8 |
+| [`print_flight`, the literal print](07-print-flight.md) | built | PR #11 |
+| [The AI assistant](08-natural-language-search.md) | built | PR #12 — **read this one first if you are touching the assistant** |
 
 All three core requirements are implemented, and so is the natural-language
 search ARCHITECTURE.md §7 designs.
