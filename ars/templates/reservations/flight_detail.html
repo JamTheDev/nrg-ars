@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static %}
+{% load static assets %}
 
 {% block title %}{{ flight.number }} &middot; seat map{% endblock %}
 
@@ -288,6 +288,6 @@
 {% endblock %}
 
 {% block scripts %}
-  <script src="{% static 'js/seatmap.js' %}" defer></script>
-  <script src="{% static 'js/seat-selection.js' %}" defer></script>
+  <script src="{% versioned_static 'js/seatmap.js' %}" defer></script>
+  <script src="{% versioned_static 'js/seat-selection.js' %}" defer></script>
 {% endblock %}
