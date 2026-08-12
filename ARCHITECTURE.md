@@ -628,7 +628,7 @@ depend on it.**
 
 | Condition | Response |
 |---|---|
-| Ollama unreachable or slow (>8s) | Map unchanged, existing selection intact, "smart search is unavailable" |
+| Ollama unreachable or slow (>30s) | Map unchanged, existing selection intact, "smart search is unavailable" |
 | Nothing matches | Map unchanged, selection intact, "No free window seats up to row 1" |
 | A match | Seats selected, camera flies to them, banner names what was understood |
 

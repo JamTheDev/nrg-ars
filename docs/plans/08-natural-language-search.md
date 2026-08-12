@@ -238,7 +238,7 @@ The three core requirements never depend on a model being up.
 
 | Condition | Response |
 |---|---|
-| Ollama unreachable or slow (>8s) | Map unchanged, existing selection intact, "smart search is unavailable" |
+| Ollama unreachable or slow (>30s) | Map unchanged, existing selection intact, "smart search is unavailable" |
 | Nothing matches | Map unchanged, selection intact, "No free window seats up to row 1" |
 | A match | Seats selected, camera flies, banner names what was understood |
 
@@ -293,7 +293,7 @@ for p in ['window seat near the front', 'farthest back window',
 |---|---|---|
 | `GENERATION_MODEL` | `assistant/providers.py` | `qwen3:1.7b`. Bigger is slower, not obviously better — see §3.2 |
 | `EMBEDDING_MODEL` | `assistant/providers.py` | Changing it means a migration **and** re-measuring §3.3 |
-| `REQUEST_TIMEOUT_SECONDS` | `assistant/providers.py` | 8s. Degradation, not an error |
+| `REQUEST_TIMEOUT_SECONDS` | `assistant/providers.py` | 30s, sized for a cold start, not a warm call |
 | `MAX_DISTANCE` | `assistant/vocabulary.py` | L2, not cosine |
 | `CONCEPTS` | `assistant/vocabulary.py` | Add a phrase when a real one fails, then `reindex_concepts` |
 | Prompt and guards | `assistant/extraction.py` | Row bands derive from `CABIN_ROWS` |

@@ -157,6 +157,13 @@ CABIN_COLUMNS = 'ABCDEF'
 MAX_PARTY_SIZE = 6
 
 
+# Natural-language search
+# The assistant talks to a local Ollama server. Override the host for a server
+# on another machine; the models themselves live in assistant/providers.py.
+
+OLLAMA_HOST = os.environ.get('OLLAMA_HOST', 'http://localhost:11434')
+
+
 # Fares
 # Placeholder flat pricing so the reservation panel can show a total. A real
 # per-flight fare belongs on Flight once booking is implemented.

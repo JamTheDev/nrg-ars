@@ -20,7 +20,14 @@ from django.conf import settings
 GENERATION_MODEL = 'qwen3:1.7b'
 EMBEDDING_MODEL = 'nomic-embed-text'  # 768 dims; must match the vec0 table
 EMBEDDING_DIMENSIONS = 768
-REQUEST_TIMEOUT_SECONDS = 8
+# Generous enough to survive a cold start. Ollama unloads an idle model, and
+# the next call pays to load it again -- measured at over 8s, which the first
+# version of this file treated as a failure. A warm call takes about a second,
+# so this ceiling is only ever reached when something is genuinely wrong.
+REQUEST_TIMEOUT_SECONDS = 30
+
+# Keep the model resident between queries, so only the first one pays.
+KEEP_ALIVE = '30m'
 
 OLLAMA_HOST = getattr(settings, 'OLLAMA_HOST', 'http://localhost:11434')
 
@@ -46,7 +53,7 @@ def embed(text: str) -> list[float]:
     Raises ProviderUnavailable if the Ollama server cannot be reached.
     """
     try:
-        response = _client().embed(model=EMBEDDING_MODEL, input=text)
+        response = _client().embed(model=EMBEDDING_MODEL, input=text, keep_alive=KEEP_ALIVE)
         vectors = response['embeddings']
     except ProviderUnavailable:
         raise
@@ -79,6 +86,7 @@ def extract_json(prompt: str, json_schema: dict, system: str = '') -> dict:
             format=json_schema,
             options={'temperature': 0},
             think=False,
+            keep_alive=KEEP_ALIVE,
         )
         content = response['message']['content']
     except ProviderUnavailable:
