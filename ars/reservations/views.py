@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from assistant import extraction
+from assistant import answers, extraction
 from assistant.providers import ProviderUnavailable
 from assistant.schema import describe
 from django.conf import settings
@@ -87,6 +87,17 @@ def _search_response(
             flight,
             message='Smart search is unavailable right now — pick a seat on the map.',
             ok=False,
+            selected=keep,
+        )
+
+    # A question wants an answer, not a selection. Every number in the reply
+    # is counted from the database; the model only says what to count.
+    if query.intent in ('count', 'status'):
+        return _booking_response(
+            request,
+            flight,
+            message=answers.answer(flight, query),
+            ok=True,
             selected=keep,
         )
 

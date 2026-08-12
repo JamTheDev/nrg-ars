@@ -77,8 +77,17 @@ uv run ars/manage.py print_flight PR101 --available-only | wc -l
 
 ### 7. Natural-language search (optional)
 
-The seat map's chat button turns the reserve bar into a search box: type
-*"window seats for 6 people"* and six window seats are selected for you.
+The seat map's chat button turns the reserve bar into a chat box. It does two
+things:
+
+- **Answers questions** about the flight — *"How many seats are available?"*,
+  *"How many window seats are there?"*, *"Is this flight full?"*
+- **Finds seats** on request — *"window seats for 6 people"*, *"farthest back
+  aisle on the right"* — selecting them on the map
+
+Every number in an answer is counted from the database. The model classifies
+the question and names the filter; it is never asked to count, because a
+language model asked to count will invent a number.
 
 **The app runs fine without any of this.** With no Ollama the box says smart
 search is unavailable and everything else — browsing, picking, booking, first
@@ -132,15 +141,17 @@ uv run ars/manage.py shell -c "
 from assistant import extraction
 from assistant.schema import describe
 for p in ['window seat near the front', 'farthest back aisle on the right',
-          '6 seats for a family in one row']:
-    print(f'{p!r:40} -> {describe(extraction.extract(p))}')
+          '6 seats for a family in one row', 'how many window seats are there?']:
+    q = extraction.extract(p)
+    print(f'{p!r:40} [{q.intent}] {describe(q)}')
 "
 ```
 
 ```
-'window seat near the front'             -> window seats up to row 10
-'farthest back aisle on the right'       -> aisle seats on the right as far back as possible
-'6 seats for a family in one row'        -> seats for 6 passengers together
+'window seat near the front'             [find]  window seats up to row 10
+'farthest back aisle on the right'       [find]  aisle seats on the right as far back as possible
+'6 seats for a family in one row'        [find]  seats for 6 passengers together
+'how many window seats are there?'       [count] window seats
 ```
 
 Wording varies slightly between runs — that is a language model, not a parser.

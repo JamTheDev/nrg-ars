@@ -220,6 +220,7 @@ class SchemaTests(TestCase):
         self.assertEqual(
             schema['required'],
             [
+                'intent',
                 'position',
                 'min_row',
                 'max_row',

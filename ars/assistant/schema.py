@@ -14,10 +14,14 @@ from django.conf import settings
 Position = Literal['window', 'aisle', 'middle']
 Toward = Literal['front', 'back']
 Side = Literal['left', 'right']
+# What the passenger wants done. "How many window seats are there?" and "give
+# me a window seat" describe the same seats and want opposite things back.
+Intent = Literal['find', 'count', 'status']
 
 
 @dataclass(frozen=True)
 class SeatQuery:
+    intent: Intent = 'find'
     flight_number: str | None = None
     destination: str | None = None
     position: Position | None = None
@@ -145,10 +149,15 @@ def seat_query_json_schema() -> dict:
                 'minimum': 1,
                 'maximum': settings.MAX_PARTY_SIZE,
             },
+            'intent': {
+                'type': 'string',
+                'enum': ['find', 'count', 'status'],
+            },
             'together': {'type': 'boolean'},
             'random': {'type': 'boolean'},
         },
         'required': [
+            'intent',
             'position',
             'min_row',
             'max_row',
