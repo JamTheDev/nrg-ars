@@ -52,6 +52,18 @@ class SearchSeatsTests(TestCase):
     def test_an_empty_query_matches_every_free_seat(self) -> None:
         self.assertEqual(len(self.search()), 180)
 
+    def test_toward_back_offers_the_rearmost_seats_first(self) -> None:
+        # "as far back as possible" must not return the front of the back
+        # section, which is what plain cabin order gives.
+        self.assertEqual(self.search(position='window', toward='back')[:2], ['30A', '30F'])
+
+    def test_toward_back_still_respects_the_bounds(self) -> None:
+        seats = self.search(position='window', min_row=10, max_row=20, toward='back')
+        self.assertEqual(seats[:2], ['20A', '20F'])
+
+    def test_toward_front_is_ordinary_cabin_order(self) -> None:
+        self.assertEqual(self.search(position='window', toward='front')[:2], ['1A', '1F'])
+
     def test_searching_is_two_queries(self) -> None:
         with self.assertNumQueries(2):
             selectors.search_seats(self.flight, SeatQuery(position='window'))

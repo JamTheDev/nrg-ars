@@ -59,6 +59,10 @@ class ValidationTests(TestCase):
         self.assertIsNone(query.min_row)
         self.assertIsNone(query.max_row)
 
+    def test_a_direction_is_kept_and_a_nonsense_one_dropped(self) -> None:
+        self.assertEqual(extraction._validate({'toward': 'back'}).toward, 'back')
+        self.assertIsNone(extraction._validate({'toward': 'sideways'}).toward)
+
     def test_invented_fields_do_not_survive(self) -> None:
         query = extraction._validate({'position': 'aisle', 'discount': 90, 'seat': '1A'})
         self.assertEqual(query, SeatQuery(position='aisle'))
@@ -90,7 +94,7 @@ class SchemaTests(TestCase):
         # position, and without bounds it answered with rows in the trillions.
         schema = seat_query_json_schema()
 
-        self.assertEqual(schema['required'], ['position', 'min_row', 'max_row'])
+        self.assertEqual(schema['required'], ['position', 'min_row', 'max_row', 'toward'])
         self.assertEqual(schema['properties']['max_row']['maximum'], 30)
         self.assertFalse(schema['additionalProperties'])
 
@@ -101,6 +105,11 @@ class SchemaTests(TestCase):
             (SeatQuery(position='aisle', min_row=21), 'aisle seats from row 21 back'),
             (SeatQuery(min_row=12, max_row=12), 'seats in row 12'),
             (SeatQuery(position='middle', min_row=5, max_row=9), 'middle seats in rows 5-9'),
+            (
+                SeatQuery(position='window', toward='back'),
+                'window seats as far back as possible',
+            ),
+            (SeatQuery(toward='front'), 'seats as far forward as possible'),
         ]:
             with self.subTest(query=query):
                 self.assertEqual(describe(query), expected)

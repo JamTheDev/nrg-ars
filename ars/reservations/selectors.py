@@ -328,6 +328,12 @@ def search_seats(flight: Flight, query, limit: int | None = None) -> list[Seat]:
         and (query.min_row is None or cell.seat.row >= query.min_row)
         and (query.max_row is None or cell.seat.row <= query.max_row)
     ]
+    # Bounds say which seats qualify; `toward` says which end to offer first.
+    # Without this, "as far back as possible" returns the front-most seat of
+    # the back section -- the filter is right and the answer is backwards.
+    if query.toward == 'back':
+        matches.sort(key=lambda cell: (-cell.seat.row, cell.seat.column))
+
     seats = [cell.seat for cell in matches]
     return seats[:limit] if limit else seats
 

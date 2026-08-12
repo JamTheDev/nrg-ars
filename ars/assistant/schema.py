@@ -12,6 +12,7 @@ from typing import Literal
 from django.conf import settings
 
 Position = Literal['window', 'aisle', 'middle']
+Toward = Literal['front', 'back']
 
 
 @dataclass(frozen=True)
@@ -21,11 +22,20 @@ class SeatQuery:
     position: Position | None = None
     min_row: int | None = None
     max_row: int | None = None
+    # Which end of the cabin the passenger is drawn to. Bounds say which seats
+    # are acceptable; this says which of them to offer first, and it is the
+    # difference between "at the back" and "as far back as possible".
+    toward: Toward | None = None
 
     @property
     def is_empty(self) -> bool:
         """Nothing was asked for -- no filter to apply."""
-        return self.position is None and self.min_row is None and self.max_row is None
+        return (
+            self.position is None
+            and self.min_row is None
+            and self.max_row is None
+            and self.toward is None
+        )
 
 
 def describe(query: SeatQuery) -> str:
@@ -35,6 +45,14 @@ def describe(query: SeatQuery) -> str:
         return 'any free seat'
 
     parts = [f'{query.position} seats'] if query.position else ['seats']
+    # Only worth saying when no bound already says it: "as far forward as
+    # possible up to row 10" tells the passenger the same thing twice.
+    if query.toward and query.min_row is None and query.max_row is None:
+        parts.append(
+            'as far back as possible'
+            if query.toward == 'back'
+            else 'as far forward as possible'
+        )
     if query.min_row and query.max_row:
         if query.min_row == query.max_row:
             parts.append(f'in row {query.min_row}')
@@ -78,7 +96,11 @@ def seat_query_json_schema() -> dict:
                 'minimum': 1,
                 'maximum': settings.CABIN_ROWS,
             },
+            'toward': {
+                'type': ['string', 'null'],
+                'enum': ['front', 'back', None],
+            },
         },
-        'required': ['position', 'min_row', 'max_row'],
+        'required': ['position', 'min_row', 'max_row', 'toward'],
         'additionalProperties': False,
     }

@@ -19,14 +19,32 @@ SYSTEM_PROMPT = """\
 Convert a passenger's seat request into filters for a cabin of {rows} rows, \
 columns {first}-{last}.
 Row 1 is the front, row {rows} is the back.
-position: "window", "aisle", "middle", or null.
-min_row/max_row: integers 1-{rows}, or null. "front" means max_row {front}. \
-"back" means min_row {back}. "row 12" means min_row 12 and max_row 12.
-Always output all three keys. Use null for anything the passenger did not ask for.
+position: "window", "aisle", "middle", or null. "middle" means a seat with a \
+passenger on each side. It does NOT mean the centre of the aircraft.
+"the middle of the plane", "the centre of the cabin", "halfway down" describe \
+rows, not a seat type: min_row {mid_start}, max_row {mid_end}, and position \
+stays null unless a seat type is also named.
+min_row/max_row: integers 1-{rows}, or null. Set both only for an explicit row \
+or range, like "row 12" or "rows 5 to 9".
+"front" means max_row {front}. "back" means min_row {back}.
+toward: "front" or "back" when the passenger wants to be as near that end as \
+possible ("furthest back", "as far forward as you can", "the very last row"), \
+otherwise null.
+Always output all four keys. Use null for anything the passenger did not ask for.
 Examples:
-"window near the front" -> {{"position":"window","min_row":null,"max_row":{front}}}
-"aisle at the back" -> {{"position":"aisle","min_row":{back},"max_row":null}}
-"anything" -> {{"position":null,"min_row":null,"max_row":null}}\
+"window near the front" -> \
+{{"position":"window","min_row":null,"max_row":{front},"toward":null}}
+"aisle at the back" -> \
+{{"position":"aisle","min_row":{back},"max_row":null,"toward":null}}
+"furthest back window seat" -> \
+{{"position":"window","min_row":null,"max_row":null,"toward":"back"}}
+"seat in row 12" -> {{"position":null,"min_row":12,"max_row":12,"toward":null}}
+"middle seat" -> {{"position":"middle","min_row":null,"max_row":null,"toward":null}}
+"somewhere in the middle of the plane" -> \
+{{"position":null,"min_row":{mid_start},"max_row":{mid_end},"toward":null}}
+"middle of the aircraft near a window" -> \
+{{"position":"window","min_row":{mid_start},"max_row":{mid_end},"toward":null}}
+"anything" -> {{"position":null,"min_row":null,"max_row":null,"toward":null}}\
 """
 
 
@@ -39,6 +57,8 @@ def system_prompt() -> str:
         last=columns[-1],
         front=max(1, rows // 3),
         back=rows - rows // 3 + 1,
+        mid_start=rows // 3 + 1,
+        mid_end=rows - rows // 3,
     )
 
 
@@ -84,6 +104,10 @@ def _validate(raw: dict) -> SeatQuery:
     if position not in POSITIONS:
         position = None
 
+    toward = raw.get('toward')
+    if toward not in ('front', 'back'):
+        toward = None
+
     min_row = _clamp_row(raw.get('min_row'))
     max_row = _clamp_row(raw.get('max_row'))
 
@@ -92,4 +116,4 @@ def _validate(raw: dict) -> SeatQuery:
     if min_row is not None and max_row is not None and min_row > max_row:
         min_row, max_row = max_row, min_row
 
-    return SeatQuery(position=position, min_row=min_row, max_row=max_row)
+    return SeatQuery(position=position, min_row=min_row, max_row=max_row, toward=toward)
