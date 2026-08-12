@@ -31,6 +31,9 @@ class SeatQuery:
     # seat" alone spans both sides, so without this "aisle on the right" can
     # only ever be answered with the left one.
     side: Side | None = None
+    # How many seats to select. The stepper says this too; a phrase like
+    # "window seats for 6 people" says it in one breath instead.
+    party: int | None = None
     # The passenger does not mind which seat they get. Offering them 1A every
     # time is a defensible reading of "random" and a poor answer to it.
     is_random: bool = False
@@ -44,6 +47,7 @@ class SeatQuery:
             and self.max_row is None
             and self.toward is None
             and self.side is None
+            and self.party is None
             and not self.is_random
         )
 
@@ -61,7 +65,7 @@ def describe(query: SeatQuery) -> str:
         and query.toward is None
         and query.side is None
     )
-    if query.is_random and unconstrained:
+    if query.is_random and unconstrained and not query.party:
         return 'any free seat, at random'
 
     noun = f'{query.position} seats' if query.position else 'seats'
@@ -85,6 +89,8 @@ def describe(query: SeatQuery) -> str:
         parts.append(f'from row {query.min_row} back')
     elif query.max_row:
         parts.append(f'up to row {query.max_row}')
+    if query.party and query.party > 1:
+        parts.append(f'for {query.party} passengers')
     return ' '.join(parts)
 
 
@@ -127,8 +133,21 @@ def seat_query_json_schema() -> dict:
                 'type': ['string', 'null'],
                 'enum': ['left', 'right', None],
             },
+            'party': {
+                'type': ['integer', 'null'],
+                'minimum': 1,
+                'maximum': settings.MAX_PARTY_SIZE,
+            },
             'random': {'type': 'boolean'},
         },
-        'required': ['position', 'min_row', 'max_row', 'toward', 'side', 'random'],
+        'required': [
+            'position',
+            'min_row',
+            'max_row',
+            'toward',
+            'side',
+            'party',
+            'random',
+        ],
         'additionalProperties': False,
     }

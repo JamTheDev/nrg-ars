@@ -110,6 +110,51 @@ class ValidationTests(TestCase):
         query = extraction._drop_unsaid_band(SeatQuery(min_row=21), 'seat in row 21')
         self.assertEqual(query.min_row, 21)
 
+    def test_a_party_nobody_counted_out_loud_is_dropped(self) -> None:
+        # Selecting six seats for someone who asked for one is the loudest way
+        # this can be wrong.
+        self.assertIsNone(
+            extraction._drop_unsaid_party(SeatQuery(party=6), 'a window seat').party
+        )
+
+    def test_a_party_the_passenger_counted_survives(self) -> None:
+        prose_with_counts = [
+            'window seats for 6 people',
+            'seats for six',
+            'for the two of us',
+            'a seat for a couple',
+        ]
+        for prose in prose_with_counts:
+            with self.subTest(prose=prose):
+                kept = extraction._drop_unsaid_party(SeatQuery(party=2), prose)
+                self.assertEqual(kept.party, 2)
+
+    def test_a_party_of_one_needs_no_counting(self) -> None:
+        self.assertEqual(extraction._drop_unsaid_party(SeatQuery(party=1), 'a seat').party, 1)
+
+    def test_the_party_is_clamped_to_the_cap(self) -> None:
+        self.assertEqual(extraction._validate({'party': 99}).party, 6)
+        self.assertEqual(extraction._validate({'party': 0}).party, 1)
+        self.assertIsNone(extraction._validate({'party': 'six'}).party)
+
+    def test_an_unsaid_direction_is_dropped(self) -> None:
+        # "window seats for 6 people" announced "as far forward as possible".
+        dropped = extraction._drop_unsaid_toward(
+            SeatQuery(toward='front'), 'window seats for 6 people'
+        )
+        self.assertIsNone(dropped.toward)
+
+    def test_a_direction_the_passenger_leaned_survives(self) -> None:
+        leaning = [
+            ('furthest back window', 'back'),
+            ('as far forward as you can', 'front'),
+            ('the very last row', 'back'),
+        ]
+        for prose, toward in leaning:
+            with self.subTest(prose=prose):
+                kept = extraction._drop_unsaid_toward(SeatQuery(toward=toward), prose)
+                self.assertEqual(kept.toward, toward)
+
     def test_invented_fields_do_not_survive(self) -> None:
         query = extraction._validate({'position': 'aisle', 'discount': 90, 'seat': '1A'})
         self.assertEqual(query, SeatQuery(position='aisle'))
@@ -143,7 +188,7 @@ class SchemaTests(TestCase):
 
         self.assertEqual(
             schema['required'],
-            ['position', 'min_row', 'max_row', 'toward', 'side', 'random'],
+            ['position', 'min_row', 'max_row', 'toward', 'side', 'party', 'random'],
         )
         self.assertEqual(schema['properties']['max_row']['maximum'], 30)
         self.assertFalse(schema['additionalProperties'])
@@ -161,6 +206,10 @@ class SchemaTests(TestCase):
             ),
             (SeatQuery(toward='front'), 'seats as far forward as possible'),
             (SeatQuery(is_random=True), 'any free seat, at random'),
+            (
+                SeatQuery(position='window', party=6),
+                'window seats for 6 passengers',
+            ),
             (
                 SeatQuery(position='aisle', side='right', min_row=21),
                 'aisle seats on the right from row 21 back',

@@ -90,10 +90,16 @@ def _search_response(
             selected=keep,
         )
 
-    try:
-        wanted = max(1, min(settings.MAX_PARTY_SIZE, int(party)))
-    except (TypeError, ValueError):
-        wanted = 1
+    # "window seats for 6 people" carries its own count. The stepper is the
+    # fallback, not the other way round: the sentence is the more recent thing
+    # the passenger said.
+    if query.party:
+        wanted = query.party
+    else:
+        try:
+            wanted = max(1, min(settings.MAX_PARTY_SIZE, int(party)))
+        except (TypeError, ValueError):
+            wanted = 1
 
     seats = selectors.search_seats(flight, query, limit=wanted)
     if not seats:

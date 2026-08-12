@@ -27,8 +27,16 @@ SIDE_WORDS = {
 
 # The same closed-set trick for the two default row bands. The model reaches
 # for "up to row 10" on requests that never mentioned the front at all.
-FRONT_WORDS = r'\b(front|forward|nose|ahead|beginning)\b'
-BACK_WORDS = r'\b(back|rear|tail|behind|end)\b'
+FRONT_WORDS = r'\b(front|forward|nose|ahead|beginning|first)\b'
+BACK_WORDS = r'\b(back|rear|tail|behind|end|last|furthest|farthest)\b'
+
+# A party size the passenger did not state is the most disruptive thing the
+# model can invent -- it selects seats for people who do not exist. Counting
+# words are a closed set, so this is checkable the same way a side is.
+COUNT_WORDS = (
+    r'\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten'
+    r'|couple|pair|both|twins?)\b'
+)
 
 # The examples matter as much as the rules: without them a small model answers
 # "near the front" with a row number in the trillions. See the plan doc.
@@ -50,38 +58,44 @@ otherwise null.
 side: "left" or "right" ONLY when the passenger says so. Never infer it. \
 Facing forward, columns {first}-{mid_col} are the left side, \
 {next_col}-{last} the right.
+party: how many seats they need, 1-{max_party}, when they say so \
+("for 6 people", "seats for the two of us"), otherwise null.
 random: true when the passenger does not mind which of the matching seats they \
 get ("random", "any seat", "surprise me", "you pick"), otherwise false. random \
 never cancels a constraint: if they also say where they want to sit, keep the \
 rows and position AND set random true.
-Always output all six keys. Use null for anything the passenger did not ask for.
+Always output all seven keys. Use null for anything the passenger did not ask for.
 Examples:
 "window near the front" -> \
-{{"position":"window","min_row":null,"max_row":{front},"toward":null,"side":null,"random":false}}
+{{"position":"window","min_row":null,"max_row":{front},"toward":null,"side":null,"party":null,"random":false}}
 "aisle at the back" -> \
-{{"position":"aisle","min_row":{back},"max_row":null,"toward":null,"side":null,"random":false}}
+{{"position":"aisle","min_row":{back},"max_row":null,"toward":null,"side":null,"party":null,"random":false}}
 "furthest back window seat" -> \
-{{"position":"window","min_row":null,"max_row":null,"toward":"back","side":null,"random":false}}
+{{"position":"window","min_row":null,"max_row":null,"toward":"back","side":null,"party":null,"random":false}}
 "seat in row 12" -> \
-{{"position":null,"min_row":12,"max_row":12,"toward":null,"side":null,"random":false}}
+{{"position":null,"min_row":12,"max_row":12,"toward":null,"side":null,"party":null,"random":false}}
 "middle seat" -> \
-{{"position":"middle","min_row":null,"max_row":null,"toward":null,"side":null,"random":false}}
+{{"position":"middle","min_row":null,"max_row":null,"toward":null,"side":null,"party":null,"random":false}}
 "a random seat in the middle of the plane" -> \
-{{"position":null,"min_row":{mid_start},"max_row":{mid_end},"toward":null,"side":null,"random":true}}
+{{"position":null,"min_row":{mid_start},"max_row":{mid_end},"toward":null,"side":null,"party":null,"random":true}}
 "middle of the aircraft near a window" -> \
-{{"position":"window","min_row":{mid_start},"max_row":{mid_end},"toward":null,"side":null,"random":false}}
+{{"position":"window","min_row":{mid_start},"max_row":{mid_end},"toward":null,"side":null,"party":null,"random":false}}
 "surprise me" -> \
-{{"position":null,"min_row":null,"max_row":null,"toward":null,"side":null,"random":true}}
+{{"position":null,"min_row":null,"max_row":null,"toward":null,"side":null,"party":null,"random":true}}
 "random seat at the back of the plane" -> \
-{{"position":null,"min_row":{back},"max_row":null,"toward":null,"side":null,\
+{{"position":null,"min_row":{back},"max_row":null,"toward":null,"side":null,"party":null,\
 "random":true}}
 "any window seat up front" -> \
-{{"position":"window","min_row":null,"max_row":{front},"toward":null,"side":null,\
+{{"position":"window","min_row":null,"max_row":{front},"toward":null,"side":null,"party":null,\
 "random":true}}
 "anything" -> \
-{{"position":null,"min_row":null,"max_row":null,"toward":null,"side":null,"random":false}}
+{{"position":null,"min_row":null,"max_row":null,"toward":null,"side":null,\
+"party":null,"random":false}}
+"window seats for 6 people" -> \
+{{"position":"window","min_row":null,"max_row":null,"toward":null,"side":null,\
+"party":6,"random":false}}
 "aisle seat on the right" -> \
-{{"position":"aisle","min_row":null,"max_row":null,"toward":null,"side":"right",\
+{{"position":"aisle","min_row":null,"max_row":null,"toward":null,"side":"right","party":null,\
 "random":false}}\
 """
 
@@ -99,6 +113,7 @@ def system_prompt() -> str:
         mid_end=rows - rows // 3,
         mid_col=columns[len(columns) // 2 - 1],
         next_col=columns[len(columns) // 2],
+        max_party=settings.MAX_PARTY_SIZE,
     )
 
 
@@ -113,7 +128,11 @@ def extract(prose: str) -> SeatQuery:
         return SeatQuery()
 
     raw = providers.extract_json(text, seat_query_json_schema(), system=system_prompt())
-    query = _drop_unsaid_band(_drop_unsaid_side(_validate(raw), text), text)
+    query = _validate(raw)
+    query = _drop_unsaid_side(query, text)
+    query = _drop_unsaid_band(query, text)
+    query = _drop_unsaid_toward(query, text)
+    query = _drop_unsaid_party(query, text)
 
     # Only ask the vocabulary index about phrasing the model made nothing of.
     # It costs an embedding call, so it is a fallback, not a step.
@@ -138,6 +157,35 @@ def _drop_unsaid_side(query: SeatQuery, prose: str) -> SeatQuery:
     if re.search(SIDE_WORDS[query.side], prose, re.IGNORECASE):
         return query
     return replace(query, side=None)
+
+
+def _drop_unsaid_party(query: SeatQuery, prose: str) -> SeatQuery:
+    """Refuse a party size nobody counted out loud.
+
+    Selecting six seats for a passenger who asked for one is the loudest way
+    this can be wrong, so a party above one needs a number, or a word that
+    stands for one, in the passenger's own sentence.
+    """
+    if not query.party or query.party == 1:
+        return query
+    if re.search(COUNT_WORDS, prose, re.IGNORECASE):
+        return query
+    return replace(query, party=None)
+
+
+def _drop_unsaid_toward(query: SeatQuery, prose: str) -> SeatQuery:
+    """Refuse an end the passenger never leaned towards.
+
+    Same closed set as the bands. Left alone, "window seats for 6 people" comes
+    back announcing "as far forward as possible", which is a preference nobody
+    expressed.
+    """
+    if not query.toward:
+        return query
+    words = FRONT_WORDS if query.toward == 'front' else BACK_WORDS
+    if re.search(words, prose, re.IGNORECASE):
+        return query
+    return replace(query, toward=None)
 
 
 def _drop_unsaid_band(query: SeatQuery, prose: str) -> SeatQuery:
@@ -197,6 +245,12 @@ def _validate(raw: dict) -> SeatQuery:
     if side not in ('left', 'right'):
         side = None
 
+    party = raw.get('party')
+    if isinstance(party, bool) or not isinstance(party, int):
+        party = None
+    else:
+        party = max(1, min(settings.MAX_PARTY_SIZE, party))
+
     # `is True` rather than truthiness: a model that answers "yes" or 1 has not
     # answered the boolean it was asked for.
     is_random = raw.get('random') is True
@@ -215,5 +269,6 @@ def _validate(raw: dict) -> SeatQuery:
         max_row=max_row,
         toward=toward,
         side=side,
+        party=party,
         is_random=is_random,
     )
