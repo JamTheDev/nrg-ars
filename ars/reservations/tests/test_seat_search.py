@@ -64,6 +64,38 @@ class SearchSeatsTests(TestCase):
     def test_toward_front_is_ordinary_cabin_order(self) -> None:
         self.assertEqual(self.search(position='window', toward='front')[:2], ['1A', '1F'])
 
+    def test_a_side_narrows_the_aisle_to_one_of_its_two_columns(self) -> None:
+        self.assertEqual(selectors.side_columns('left'), {'A', 'B', 'C'})
+        self.assertEqual(selectors.side_columns('right'), {'D', 'E', 'F'})
+        # "aisle" alone spans both sides; with a side it is one column.
+        self.assertEqual(self.search(position='aisle', side='right')[:2], ['1D', '2D'])
+        self.assertEqual(self.search(position='aisle', side='left')[:2], ['1C', '2C'])
+
+    def test_side_and_direction_compose(self) -> None:
+        seats = self.search(position='aisle', side='right', toward='back')
+        self.assertEqual(seats[0], '30D')
+
+    def test_random_shuffles_within_the_matches(self) -> None:
+        import random as random_module
+
+        query = SeatQuery(position='window', min_row=1, max_row=5, is_random=True)
+        picked = selectors.search_seats(
+            self.flight, query, limit=3, rng=random_module.Random(7)
+        )
+        designations = [seat.designation for seat in picked]
+
+        # Still only matching seats, but not simply the first three.
+        self.assertTrue(all(d[-1] in 'AF' and int(d[:-1]) <= 5 for d in designations))
+        self.assertNotEqual(designations, ['1A', '1F', '2A'])
+
+    def test_random_is_reproducible_for_a_given_seed(self) -> None:
+        import random as random_module
+
+        query = SeatQuery(is_random=True)
+        first = selectors.search_seats(self.flight, query, limit=4, rng=random_module.Random(1))
+        second = selectors.search_seats(self.flight, query, limit=4, rng=random_module.Random(1))
+        self.assertEqual([s.designation for s in first], [s.designation for s in second])
+
     def test_searching_is_two_queries(self) -> None:
         with self.assertNumQueries(2):
             selectors.search_seats(self.flight, SeatQuery(position='window'))

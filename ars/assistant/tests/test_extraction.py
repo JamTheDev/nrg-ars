@@ -63,6 +63,30 @@ class ValidationTests(TestCase):
         self.assertEqual(extraction._validate({'toward': 'back'}).toward, 'back')
         self.assertIsNone(extraction._validate({'toward': 'sideways'}).toward)
 
+    def test_random_must_be_the_boolean_it_was_asked_for(self) -> None:
+        self.assertTrue(extraction._validate({'random': True}).is_random)
+        for answer in ('yes', 1, 'true', None):
+            with self.subTest(answer=answer):
+                self.assertFalse(extraction._validate({'random': answer}).is_random)
+
+    def test_a_side_the_passenger_never_said_is_dropped(self) -> None:
+        # The model asserts "right" for "aisle seat at the back" often enough
+        # that this has to be enforced rather than requested.
+        invented = extraction._drop_unsaid_side(SeatQuery(side='right'), 'aisle seat at the back')
+        self.assertIsNone(invented.side)
+
+    def test_a_side_the_passenger_did_say_survives(self) -> None:
+        for prose in ['aisle on the right', 'starboard window', 'RIGHT side please']:
+            with self.subTest(prose=prose):
+                kept = extraction._drop_unsaid_side(SeatQuery(side='right'), prose)
+                self.assertEqual(kept.side, 'right')
+
+    def test_the_guard_does_not_match_a_word_that_merely_contains_a_side(self) -> None:
+        # "alright" is not a request for the right-hand aisle.
+        self.assertIsNone(
+            extraction._drop_unsaid_side(SeatQuery(side='right'), 'alright anywhere').side
+        )
+
     def test_invented_fields_do_not_survive(self) -> None:
         query = extraction._validate({'position': 'aisle', 'discount': 90, 'seat': '1A'})
         self.assertEqual(query, SeatQuery(position='aisle'))
@@ -94,7 +118,10 @@ class SchemaTests(TestCase):
         # position, and without bounds it answered with rows in the trillions.
         schema = seat_query_json_schema()
 
-        self.assertEqual(schema['required'], ['position', 'min_row', 'max_row', 'toward'])
+        self.assertEqual(
+            schema['required'],
+            ['position', 'min_row', 'max_row', 'toward', 'side', 'random'],
+        )
         self.assertEqual(schema['properties']['max_row']['maximum'], 30)
         self.assertFalse(schema['additionalProperties'])
 
@@ -110,6 +137,15 @@ class SchemaTests(TestCase):
                 'window seats as far back as possible',
             ),
             (SeatQuery(toward='front'), 'seats as far forward as possible'),
+            (SeatQuery(is_random=True), 'any free seat, at random'),
+            (
+                SeatQuery(position='aisle', side='right', min_row=21),
+                'aisle seats on the right from row 21 back',
+            ),
+            (
+                SeatQuery(position='window', is_random=True, min_row=11, max_row=20),
+                'random window seats in rows 11-20',
+            ),
         ]:
             with self.subTest(query=query):
                 self.assertEqual(describe(query), expected)

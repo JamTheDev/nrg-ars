@@ -6,12 +6,24 @@ are dropped and out-of-range rows clamped here, before any query runs.
 
 from __future__ import annotations
 
+import re
+from dataclasses import replace
+
 from django.conf import settings
 
 from assistant import providers, vocabulary
 from assistant.schema import SeatQuery, seat_query_json_schema
 
 POSITIONS = ('window', 'aisle', 'middle')
+
+# A side is the one field the passenger's own words can be checked against:
+# unlike "window", which has endless synonyms, naming a side takes one of a
+# closed set of words. The model asserts "right" for "aisle seat at the back"
+# often enough that asking it more nicely is not the fix.
+SIDE_WORDS = {
+    'left': r'\b(left|port)\b',
+    'right': r'\b(right|starboard)\b',
+}
 
 # The examples matter as much as the rules: without them a small model answers
 # "near the front" with a row number in the trillions. See the plan doc.
@@ -30,21 +42,34 @@ or range, like "row 12" or "rows 5 to 9".
 toward: "front" or "back" when the passenger wants to be as near that end as \
 possible ("furthest back", "as far forward as you can", "the very last row"), \
 otherwise null.
-Always output all four keys. Use null for anything the passenger did not ask for.
+side: "left" or "right" ONLY when the passenger says so. Never infer it. \
+Facing forward, columns {first}-{mid_col} are the left side, \
+{next_col}-{last} the right.
+random: true when the passenger does not mind which of the matching seats they \
+get ("random", "any seat", "surprise me", "you pick"), otherwise false.
+Always output all six keys. Use null for anything the passenger did not ask for.
 Examples:
 "window near the front" -> \
-{{"position":"window","min_row":null,"max_row":{front},"toward":null}}
+{{"position":"window","min_row":null,"max_row":{front},"toward":null,"side":null,"random":false}}
 "aisle at the back" -> \
-{{"position":"aisle","min_row":{back},"max_row":null,"toward":null}}
+{{"position":"aisle","min_row":{back},"max_row":null,"toward":null,"side":null,"random":false}}
 "furthest back window seat" -> \
-{{"position":"window","min_row":null,"max_row":null,"toward":"back"}}
-"seat in row 12" -> {{"position":null,"min_row":12,"max_row":12,"toward":null}}
-"middle seat" -> {{"position":"middle","min_row":null,"max_row":null,"toward":null}}
-"somewhere in the middle of the plane" -> \
-{{"position":null,"min_row":{mid_start},"max_row":{mid_end},"toward":null}}
+{{"position":"window","min_row":null,"max_row":null,"toward":"back","side":null,"random":false}}
+"seat in row 12" -> \
+{{"position":null,"min_row":12,"max_row":12,"toward":null,"side":null,"random":false}}
+"middle seat" -> \
+{{"position":"middle","min_row":null,"max_row":null,"toward":null,"side":null,"random":false}}
+"a random seat in the middle of the plane" -> \
+{{"position":null,"min_row":{mid_start},"max_row":{mid_end},"toward":null,"side":null,"random":true}}
 "middle of the aircraft near a window" -> \
-{{"position":"window","min_row":{mid_start},"max_row":{mid_end},"toward":null}}
-"anything" -> {{"position":null,"min_row":null,"max_row":null,"toward":null}}\
+{{"position":"window","min_row":{mid_start},"max_row":{mid_end},"toward":null,"side":null,"random":false}}
+"surprise me" -> \
+{{"position":null,"min_row":null,"max_row":null,"toward":null,"side":null,"random":true}}
+"anything" -> \
+{{"position":null,"min_row":null,"max_row":null,"toward":null,"side":null,"random":false}}
+"aisle seat on the right" -> \
+{{"position":"aisle","min_row":null,"max_row":null,"toward":null,"side":"right",\
+"random":false}}\
 """
 
 
@@ -59,6 +84,8 @@ def system_prompt() -> str:
         back=rows - rows // 3 + 1,
         mid_start=rows // 3 + 1,
         mid_end=rows - rows // 3,
+        mid_col=columns[len(columns) // 2 - 1],
+        next_col=columns[len(columns) // 2],
     )
 
 
@@ -73,7 +100,7 @@ def extract(prose: str) -> SeatQuery:
         return SeatQuery()
 
     raw = providers.extract_json(text, seat_query_json_schema(), system=system_prompt())
-    query = _validate(raw)
+    query = _drop_unsaid_side(_validate(raw), text)
 
     # Only ask the vocabulary index about phrasing the model made nothing of.
     # It costs an embedding call, so it is a fallback, not a step.
@@ -84,6 +111,20 @@ def extract(prose: str) -> SeatQuery:
             query = _validate({**raw, field: value})
 
     return query
+
+
+def _drop_unsaid_side(query: SeatQuery, prose: str) -> SeatQuery:
+    """Refuse a side the passenger never mentioned.
+
+    Answering "aisle seat at the back" with the right-hand aisle is not a
+    worse guess than the left one -- it is an answer to a question that was
+    not asked, and it hides half the cabin for no reason.
+    """
+    if not query.side:
+        return query
+    if re.search(SIDE_WORDS[query.side], prose, re.IGNORECASE):
+        return query
+    return replace(query, side=None)
 
 
 def _clamp_row(value: object) -> int | None:
@@ -108,6 +149,14 @@ def _validate(raw: dict) -> SeatQuery:
     if toward not in ('front', 'back'):
         toward = None
 
+    side = raw.get('side')
+    if side not in ('left', 'right'):
+        side = None
+
+    # `is True` rather than truthiness: a model that answers "yes" or 1 has not
+    # answered the boolean it was asked for.
+    is_random = raw.get('random') is True
+
     min_row = _clamp_row(raw.get('min_row'))
     max_row = _clamp_row(raw.get('max_row'))
 
@@ -116,4 +165,11 @@ def _validate(raw: dict) -> SeatQuery:
     if min_row is not None and max_row is not None and min_row > max_row:
         min_row, max_row = max_row, min_row
 
-    return SeatQuery(position=position, min_row=min_row, max_row=max_row, toward=toward)
+    return SeatQuery(
+        position=position,
+        min_row=min_row,
+        max_row=max_row,
+        toward=toward,
+        side=side,
+        is_random=is_random,
+    )

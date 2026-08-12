@@ -13,6 +13,7 @@ from django.conf import settings
 
 Position = Literal['window', 'aisle', 'middle']
 Toward = Literal['front', 'back']
+Side = Literal['left', 'right']
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,13 @@ class SeatQuery:
     # are acceptable; this says which of them to offer first, and it is the
     # difference between "at the back" and "as far back as possible".
     toward: Toward | None = None
+    # Which side of the aisle, facing forward: A-C left, D-F right. "Aisle
+    # seat" alone spans both sides, so without this "aisle on the right" can
+    # only ever be answered with the left one.
+    side: Side | None = None
+    # The passenger does not mind which seat they get. Offering them 1A every
+    # time is a defensible reading of "random" and a poor answer to it.
+    is_random: bool = False
 
     @property
     def is_empty(self) -> bool:
@@ -35,6 +43,8 @@ class SeatQuery:
             and self.min_row is None
             and self.max_row is None
             and self.toward is None
+            and self.side is None
+            and not self.is_random
         )
 
 
@@ -44,7 +54,20 @@ def describe(query: SeatQuery) -> str:
     if query.is_empty:
         return 'any free seat'
 
-    parts = [f'{query.position} seats'] if query.position else ['seats']
+    unconstrained = (
+        query.position is None
+        and query.min_row is None
+        and query.max_row is None
+        and query.toward is None
+        and query.side is None
+    )
+    if query.is_random and unconstrained:
+        return 'any free seat, at random'
+
+    noun = f'{query.position} seats' if query.position else 'seats'
+    parts = [f'random {noun}' if query.is_random else noun]
+    if query.side:
+        parts.append(f'on the {query.side}')
     # Only worth saying when no bound already says it: "as far forward as
     # possible up to row 10" tells the passenger the same thing twice.
     if query.toward and query.min_row is None and query.max_row is None:
@@ -100,7 +123,12 @@ def seat_query_json_schema() -> dict:
                 'type': ['string', 'null'],
                 'enum': ['front', 'back', None],
             },
+            'side': {
+                'type': ['string', 'null'],
+                'enum': ['left', 'right', None],
+            },
+            'random': {'type': 'boolean'},
         },
-        'required': ['position', 'min_row', 'max_row', 'toward'],
+        'required': ['position', 'min_row', 'max_row', 'toward', 'side', 'random'],
         'additionalProperties': False,
     }

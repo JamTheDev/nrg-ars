@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Literal
@@ -310,7 +311,20 @@ def position_columns(position: str) -> set[str]:
     }[position]
 
 
-def search_seats(flight: Flight, query, limit: int | None = None) -> list[Seat]:
+def side_columns(side: str) -> set[str]:
+    """Which columns are on the left or the right of the aisle.
+
+    Facing forward: A-C on the left, D-F on the right. Derived from the layout
+    for the same reason the position sets are.
+    """
+    columns = settings.CABIN_COLUMNS
+    split = aisle_index()
+    return {'left': set(columns[:split]), 'right': set(columns[split:])}[side]
+
+
+def search_seats(
+    flight: Flight, query, limit: int | None = None, rng: random.Random | None = None
+) -> list[Seat]:
     """Free seats on `flight` matching a validated SeatQuery, in cabin order.
 
     The filter arrives already clamped by the assistant; this only applies it.
@@ -318,6 +332,7 @@ def search_seats(flight: Flight, query, limit: int | None = None) -> list[Seat]:
     """
     cabin = seat_map(flight)
     columns = position_columns(query.position) if query.position else None
+    side = side_columns(query.side) if query.side else None
 
     matches = [
         cell
@@ -325,13 +340,17 @@ def search_seats(flight: Flight, query, limit: int | None = None) -> list[Seat]:
         for cell in row.cells
         if not cell.is_taken
         and (columns is None or cell.seat.column in columns)
+        and (side is None or cell.seat.column in side)
         and (query.min_row is None or cell.seat.row >= query.min_row)
         and (query.max_row is None or cell.seat.row <= query.max_row)
     ]
-    # Bounds say which seats qualify; `toward` says which end to offer first.
-    # Without this, "as far back as possible" returns the front-most seat of
-    # the back section -- the filter is right and the answer is backwards.
-    if query.toward == 'back':
+
+    # Bounds say which seats qualify; these say which of them to offer first.
+    if query.is_random:
+        (rng or random.Random()).shuffle(matches)
+    elif query.toward == 'back':
+        # Without this, "as far back as possible" returns the front-most seat
+        # of the back section -- filter right, answer backwards.
         matches.sort(key=lambda cell: (-cell.seat.row, cell.seat.column))
 
     seats = [cell.seat for cell in matches]
