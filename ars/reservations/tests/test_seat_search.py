@@ -120,6 +120,32 @@ class SearchSeatsTests(TestCase):
         second = selectors.search_seats(self.flight, query, limit=4, rng=random_module.Random(1))
         self.assertEqual([s.designation for s in first], [s.designation for s in second])
 
+    def test_together_puts_the_party_in_one_row(self) -> None:
+        seats = selectors.search_seats(
+            self.flight, SeatQuery(party=6, together=True), limit=6
+        )
+        self.assertEqual([s.designation for s in seats], ['1A', '1B', '1C', '1D', '1E', '1F'])
+
+    def test_together_skips_a_row_that_cannot_hold_them_all(self) -> None:
+        services.book_seats(self.flight, [services.SeatRequest('1C', 'Ada Lovelace')])
+
+        seats = selectors.search_seats(
+            self.flight, SeatQuery(party=6, together=True), limit=6
+        )
+        self.assertEqual({s.row for s in seats}, {2})
+
+    def test_together_falls_back_rather_than_refusing(self) -> None:
+        # Window seats can never be six in a row; the filter still wins.
+        seats = selectors.search_seats(
+            self.flight, SeatQuery(position='window', party=6, together=True), limit=6
+        )
+        self.assertEqual(len(seats), 6)
+        self.assertTrue(all(s.column in 'AF' for s in seats))
+
+    def test_together_is_ignored_for_a_single_seat(self) -> None:
+        seats = selectors.search_seats(self.flight, SeatQuery(together=True), limit=1)
+        self.assertEqual([s.designation for s in seats], ['1A'])
+
     def test_searching_is_two_queries(self) -> None:
         with self.assertNumQueries(2):
             selectors.search_seats(self.flight, SeatQuery(position='window'))

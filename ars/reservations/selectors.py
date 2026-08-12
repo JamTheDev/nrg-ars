@@ -345,6 +345,17 @@ def search_seats(
         and (query.max_row is None or cell.seat.row <= query.max_row)
     ]
 
+    # A group asked to sit together is asked for one thing, not `limit` things
+    # that each satisfy the filter. Prefer a single row that can hold them all;
+    # if none can, fall through and offer the closest the filter allows.
+    if query.together and limit and limit > 1:
+        by_row: dict[int, list[SeatCell]] = {}
+        for cell in matches:
+            by_row.setdefault(cell.seat.row, []).append(cell)
+        for number in sorted(by_row):
+            if len(by_row[number]) >= limit:
+                return [cell.seat for cell in by_row[number][:limit]]
+
     # Bounds say which seats qualify; these say which of them to offer first.
     if query.is_random:
         # "a random seat at the back" is a random seat *at the back*. Shuffling

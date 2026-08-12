@@ -155,6 +155,37 @@ class ValidationTests(TestCase):
                 kept = extraction._drop_unsaid_toward(SeatQuery(toward=toward), prose)
                 self.assertEqual(kept.toward, toward)
 
+    def test_an_invented_seat_type_is_dropped(self) -> None:
+        # "a family in one row" is not a request for middle seats, however
+        # firmly the model believes otherwise.
+        dropped = extraction._drop_unsaid_position(
+            SeatQuery(position='middle'), '6 seats for a family one row'
+        )
+        self.assertIsNone(dropped.position)
+
+    def test_a_seat_type_the_passenger_named_survives(self) -> None:
+        kept = [
+            ('window', 'a window seat'),
+            ('window', 'by the porthole'),
+            ('window', 'somewhere with a view'),
+            ('aisle', 'on the corridor'),
+            ('middle', 'a middle seat'),
+        ]
+        for position, prose in kept:
+            with self.subTest(prose=prose):
+                query = extraction._drop_unsaid_position(SeatQuery(position=position), prose)
+                self.assertEqual(query.position, position)
+
+    def test_grouping_is_a_request_not_an_assumption(self) -> None:
+        self.assertFalse(
+            extraction._drop_unsaid_together(SeatQuery(together=True), 'a window seat').together
+        )
+        for prose in ['6 seats in one row', 'seats for 4 together', 'for a family']:
+            with self.subTest(prose=prose):
+                self.assertTrue(
+                    extraction._drop_unsaid_together(SeatQuery(together=True), prose).together
+                )
+
     def test_invented_fields_do_not_survive(self) -> None:
         query = extraction._validate({'position': 'aisle', 'discount': 90, 'seat': '1A'})
         self.assertEqual(query, SeatQuery(position='aisle'))
@@ -188,7 +219,16 @@ class SchemaTests(TestCase):
 
         self.assertEqual(
             schema['required'],
-            ['position', 'min_row', 'max_row', 'toward', 'side', 'party', 'random'],
+            [
+                'position',
+                'min_row',
+                'max_row',
+                'toward',
+                'side',
+                'party',
+                'together',
+                'random',
+            ],
         )
         self.assertEqual(schema['properties']['max_row']['maximum'], 30)
         self.assertFalse(schema['additionalProperties'])

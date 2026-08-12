@@ -34,6 +34,10 @@ class SeatQuery:
     # How many seats to select. The stepper says this too; a phrase like
     # "window seats for 6 people" says it in one breath instead.
     party: int | None = None
+    # Seat the party as a group rather than wherever the filter happens to
+    # match first. A family of six spread over three rows satisfies the filter
+    # and not the request.
+    together: bool = False
     # The passenger does not mind which seat they get. Offering them 1A every
     # time is a defensible reading of "random" and a poor answer to it.
     is_random: bool = False
@@ -48,6 +52,7 @@ class SeatQuery:
             and self.toward is None
             and self.side is None
             and self.party is None
+            and not self.together
             and not self.is_random
         )
 
@@ -91,6 +96,8 @@ def describe(query: SeatQuery) -> str:
         parts.append(f'up to row {query.max_row}')
     if query.party and query.party > 1:
         parts.append(f'for {query.party} passengers')
+    if query.together:
+        parts.append('together')
     return ' '.join(parts)
 
 
@@ -138,6 +145,7 @@ def seat_query_json_schema() -> dict:
                 'minimum': 1,
                 'maximum': settings.MAX_PARTY_SIZE,
             },
+            'together': {'type': 'boolean'},
             'random': {'type': 'boolean'},
         },
         'required': [
@@ -147,6 +155,7 @@ def seat_query_json_schema() -> dict:
             'toward',
             'side',
             'party',
+            'together',
             'random',
         ],
         'additionalProperties': False,
