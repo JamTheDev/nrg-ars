@@ -290,7 +290,7 @@ Full page loads only on navigation. Every booking action swaps a fragment.
 | `GET /flights/<id>/` | `flight-detail` | Full page: seat map + booking form |
 | `POST /flights/<id>/book/` | `book-seat` | **Fragment** — updated seat map |
 | `POST /flights/<id>/book/first/` | `book-first` | **Fragment** — updated seat map |
-| `GET /flights/<id>/map/` | `seat-map` | **Fragment** — seat map, optionally with a party's seats already chosen (`?party=4&keep=12A`) |
+| `GET /flights/<id>/map/` | `seat-map` | **Fragment** — seat map, optionally with seats already chosen: `?party=4&keep=12A`, or `?q=window+seat+near+the+front` |
 
 Templates split so the fragment and the full page render the identical markup:
 
@@ -507,8 +507,34 @@ there need a Homebrew or `uv`-managed Python.
 
 | Role | Model | Notes |
 |---|---|---|
-| Generation / extraction | `qwen3:14b` | Already installed. Strong constrained-JSON support. |
-| Embedding | `nomic-embed-text` | **Not yet installed** — `ollama pull nomic-embed-text`. 768 dimensions, matching the `vec0` table above. |
+| Generation / extraction | `qwen3:1.7b` | ~1s per query. Chosen over `qwen3:14b` by measurement, below. |
+| Embedding | `nomic-embed-text` | Installed. 768 dimensions, matching the `vec0` table above. |
+
+### Three things measurement decided
+
+**`think=False` is mandatory, not a tuning knob.** qwen3 reasons before
+answering by default. The same extraction that returns in about a second
+without thinking was still running after **sixty seconds** with it.
+
+**The small model is the right one, because the schema does the work.**
+`qwen3:14b` answers correctly but takes 6–7s warm, which reads as broken at a
+kiosk. `qwen3:1.7b` answers in ~1s — and its first attempts were garbage
+(`max_row: 1000000000000000`, `position` missing entirely) until the JSON
+schema was tightened. What fixed it was not a bigger model:
+
+- `required: [position, min_row, max_row]` — otherwise the model omits keys it
+  is unsure about
+- `minimum`/`maximum` on the rows, from `CABIN_ROWS`
+- three worked examples in the system prompt
+
+The validation layer stays regardless. A schema constrains a well-behaved
+model; it is not a guarantee, and `_validate()` clamps what arrives anyway.
+
+**`vec0` measures L2 distance, not cosine**, so the match threshold is not a
+0–1 similarity. Measured against this corpus with `nomic-embed-text`: genuine
+rephrasings land at 0.60–0.65, related-but-wrong at 0.91–0.98, and nonsense
+above 1.09. The cut sits at 0.80, in the gap. Those numbers are properties of
+the embedding model — changing it means re-measuring.
 
 The embedding dimension is baked into the virtual table. **Changing embedding
 model means dropping and rebuilding the index** — a migration, not a config edit.
@@ -606,5 +632,8 @@ CLI (see README).
   total. Real pricing belongs on `Flight` (or a fare class), which is a
   migration, not a config edit.
 - **No seat holds.** Deliberately scoped out; see the selection note above.
+- **Natural-language search is within one flight.** `SeatQuery` carries
+  `flight_number` and `destination` for a future search across flights; this
+  release leaves them unused rather than removing them.
 - **`DEBUG = True`** and no deployment target chosen.
 - **Second aircraft layout** would trigger the `Seat` → `Aircraft` migration in §1.

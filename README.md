@@ -75,7 +75,22 @@ uv run ars/manage.py print_flight PR101
 uv run ars/manage.py print_flight PR101 --available-only | wc -l
 ```
 
-### 7. Start the server
+### 7. Natural-language search (optional)
+
+The seat map has a search box: *"window seat near the front"*. It needs a local
+[Ollama](https://ollama.com) server with two models, and the concept index
+built once:
+
+```bash
+ollama pull qwen3:1.7b
+ollama pull nomic-embed-text
+uv run ars/manage.py reindex_concepts
+```
+
+Without Ollama the box reports that smart search is unavailable and the seat
+map carries on working — booking never depends on a model being up.
+
+### 8. Start the server
 
 ```bash
 uv run ars/manage.py runserver

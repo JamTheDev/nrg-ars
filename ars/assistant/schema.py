@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from django.conf import settings
+
 Position = Literal['window', 'aisle', 'middle']
 
 
@@ -20,17 +22,63 @@ class SeatQuery:
     min_row: int | None = None
     max_row: int | None = None
 
+    @property
+    def is_empty(self) -> bool:
+        """Nothing was asked for -- no filter to apply."""
+        return self.position is None and self.min_row is None and self.max_row is None
 
-# Passed to Ollama as `format=` so decoding is constrained to this shape rather
-# than parsed out of prose after the fact.
-SEAT_QUERY_JSON_SCHEMA: dict = {
-    'type': 'object',
-    'properties': {
-        'flight_number': {'type': ['string', 'null']},
-        'destination': {'type': ['string', 'null'], 'maxLength': 3},
-        'position': {'type': ['string', 'null'], 'enum': ['window', 'aisle', 'middle', None]},
-        'min_row': {'type': ['integer', 'null']},
-        'max_row': {'type': ['integer', 'null']},
-    },
-    'additionalProperties': False,
-}
+
+def describe(query: SeatQuery) -> str:
+    """A short human reading of a filter, so the passenger can see what was
+    understood rather than guessing from which seats lit up."""
+    if query.is_empty:
+        return 'any free seat'
+
+    parts = [f'{query.position} seats'] if query.position else ['seats']
+    if query.min_row and query.max_row:
+        if query.min_row == query.max_row:
+            parts.append(f'in row {query.min_row}')
+        else:
+            parts.append(f'in rows {query.min_row}-{query.max_row}')
+    elif query.min_row:
+        parts.append(f'from row {query.min_row} back')
+    elif query.max_row:
+        parts.append(f'up to row {query.max_row}')
+    return ' '.join(parts)
+
+
+def seat_query_json_schema() -> dict:
+    """The shape Ollama is constrained to, built from the real cabin size.
+
+    Three things here are load-bearing, learned by measurement rather than
+    guessed (see docs/plans/08-natural-language-search.md):
+
+    * `required` -- without it the model omits keys it is unsure about, and
+      `position` went missing on half the phrasings.
+    * `minimum`/`maximum` -- without bounds a 1.7B model answered "near the
+      front" with max_row 1000000000000000.
+    * only the within-flight fields are offered. `flight_number` and
+      `destination` stay on the dataclass for a future search across flights,
+      but asking for fields this release cannot use invites invented values.
+    """
+    return {
+        'type': 'object',
+        'properties': {
+            'position': {
+                'type': ['string', 'null'],
+                'enum': ['window', 'aisle', 'middle', None],
+            },
+            'min_row': {
+                'type': ['integer', 'null'],
+                'minimum': 1,
+                'maximum': settings.CABIN_ROWS,
+            },
+            'max_row': {
+                'type': ['integer', 'null'],
+                'minimum': 1,
+                'maximum': settings.CABIN_ROWS,
+            },
+        },
+        'required': ['position', 'min_row', 'max_row'],
+        'additionalProperties': False,
+    }

@@ -22,7 +22,36 @@
         </p>
       </div>
 
-      <div class="ml-auto flex items-center gap-5 text-sm">
+      {% comment %}
+        Natural-language search. Another way to drive the same seat-map
+        endpoint the stepper uses, so the result arrives as a selection and the
+        camera flies to it with no extra machinery.
+      {% endcomment %}
+      <form
+        id="seat-search"
+        class="ml-auto"
+        hx-get="{% url 'seat-map' flight.id %}"
+        hx-target="#seat-map"
+        hx-swap="outerHTML"
+        hx-indicator="#seat-search-busy"
+      >
+        <label class="relative block">
+          <span class="sr-only">Describe the seat you want</span>
+          <input
+            type="search"
+            name="q"
+            autocomplete="off"
+            placeholder="window seat near the front&hellip;"
+            class="w-72 rounded-lg border border-slate-200 py-1.5 pl-3 pr-9 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+          >
+          <span
+            id="seat-search-busy"
+            class="htmx-indicator absolute right-3 top-1/2 -translate-y-1/2 text-xs text-sky-600"
+          >&hellip;</span>
+        </label>
+      </form>
+
+      <div class="flex items-center gap-5 text-sm">
         <button
           type="button"
           data-action="first-available"

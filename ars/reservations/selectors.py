@@ -293,6 +293,45 @@ def pick_party_seats(
     return PartyPick(seats=[cell.seat for cell in ordered], tier=_classify(ordered))
 
 
+def position_columns(position: str) -> set[str]:
+    """Which columns count as window, aisle or middle.
+
+    Computed from CABIN_COLUMNS so a layout change cannot leave a stored flag
+    stale -- see ARCHITECTURE.md section 7.
+    """
+    columns = settings.CABIN_COLUMNS
+    split = aisle_index()
+    window = {columns[0], columns[-1]}
+    aisle = {columns[split - 1], columns[split]}
+    return {
+        'window': window,
+        'aisle': aisle,
+        'middle': set(columns) - window - aisle,
+    }[position]
+
+
+def search_seats(flight: Flight, query, limit: int | None = None) -> list[Seat]:
+    """Free seats on `flight` matching a validated SeatQuery, in cabin order.
+
+    The filter arrives already clamped by the assistant; this only applies it.
+    Two queries, via seat_map().
+    """
+    cabin = seat_map(flight)
+    columns = position_columns(query.position) if query.position else None
+
+    matches = [
+        cell
+        for row in cabin.rows
+        for cell in row.cells
+        if not cell.is_taken
+        and (columns is None or cell.seat.column in columns)
+        and (query.min_row is None or cell.seat.row >= query.min_row)
+        and (query.max_row is None or cell.seat.row <= query.max_row)
+    ]
+    seats = [cell.seat for cell in matches]
+    return seats[:limit] if limit else seats
+
+
 def _pick_fresh(cabin: Cabin, free: Sequence[SeatCell], size: int) -> list[SeatCell]:
     """Walk the preference ladder: one block, one row, two rows, anything."""
     blocks = _blocks(cabin)
