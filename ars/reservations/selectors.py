@@ -104,7 +104,12 @@ def flight_rows() -> list[FlightRow]:
     from `Booking`, so it can never drift out of sync.
     """
     capacity = cabin_capacity()
-    flights = Flight.objects.annotate(booked_count=Count('bookings'))
+    # Order explicitly. Meta.ordering is ignored once a query groups for an
+    # aggregate, so the annotate() below silently drops it -- the board looked
+    # chronological only because the demo flights were seeded in that order.
+    flights = Flight.objects.annotate(booked_count=Count('bookings')).order_by(
+        'departs_at', 'number'
+    )
     return [
         FlightRow(
             flight=flight,
@@ -322,6 +327,62 @@ def side_columns(side: str) -> set[str]:
     return {'left': set(columns[:split]), 'right': set(columns[split:])}[side]
 
 
+def _matches(cell: SeatCell, query, columns, side) -> bool:
+    return (
+        (columns is None or cell.seat.column in columns)
+        and (side is None or cell.seat.column in side)
+        and (query.min_row is None or cell.seat.row >= query.min_row)
+        and (query.max_row is None or cell.seat.row <= query.max_row)
+    )
+
+
+@dataclass(frozen=True)
+class SeatCounts:
+    """What a filter describes: how many seats, which, and how many are free.
+
+    Answering "how many window seats are there?" needs both numbers -- the
+    cabin's shape and today's availability are different questions, and a bot
+    that conflates them is wrong twice a day. Answering "*which* seats" needs
+    the extent as well, which is why the ends and the columns come along.
+    """
+
+    matching: int
+    free: int
+    first: str | None = None
+    last: str | None = None
+    first_row: int | None = None
+    last_row: int | None = None
+    columns: tuple[str, ...] = ()
+
+    @property
+    def taken(self) -> int:
+        return self.matching - self.free
+
+
+def count_seats(flight: Flight, query) -> SeatCounts:
+    """Count the seats a SeatQuery describes. Two queries, like everything else."""
+    cabin = seat_map(flight)
+    columns = position_columns(query.position) if query.position else None
+    side = side_columns(query.side) if query.side else None
+
+    cells = [
+        cell
+        for row in cabin.rows
+        for cell in row.cells
+        if _matches(cell, query, columns, side)
+    ]
+    ordered = _cabin_order(cells)
+    return SeatCounts(
+        matching=len(ordered),
+        free=sum(1 for cell in ordered if not cell.is_taken),
+        first=ordered[0].designation if ordered else None,
+        last=ordered[-1].designation if ordered else None,
+        first_row=ordered[0].seat.row if ordered else None,
+        last_row=ordered[-1].seat.row if ordered else None,
+        columns=tuple(sorted({cell.seat.column for cell in ordered})),
+    )
+
+
 def search_seats(
     flight: Flight, query, limit: int | None = None, rng: random.Random | None = None
 ) -> list[Seat]:
@@ -338,11 +399,7 @@ def search_seats(
         cell
         for row in cabin.rows
         for cell in row.cells
-        if not cell.is_taken
-        and (columns is None or cell.seat.column in columns)
-        and (side is None or cell.seat.column in side)
-        and (query.min_row is None or cell.seat.row >= query.min_row)
-        and (query.max_row is None or cell.seat.row <= query.max_row)
+        if not cell.is_taken and _matches(cell, query, columns, side)
     ]
 
     # A group asked to sit together is asked for one thing, not `limit` things

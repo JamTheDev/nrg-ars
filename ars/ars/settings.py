@@ -128,7 +128,8 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+# The kiosk stands in Manila; times are stored UTC and shown local.
+TIME_ZONE = 'Asia/Manila'
 
 USE_I18N = True
 

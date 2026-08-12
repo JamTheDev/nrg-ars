@@ -300,7 +300,7 @@ for p in ['window seat near the front', 'farthest back window',
 
 ---
 
-## 7. Known rough edges
+## 7. Limits, and why each one stands
 
 - **An invented position survives.** *"seats for six"* comes back as window
   seats. The guard's word list cannot be tightened without breaking the open

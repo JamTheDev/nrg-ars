@@ -7,8 +7,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from assistant import extraction
+from assistant import answers, extraction
+from assistant.prompts import UNSAFE_REPLY
 from assistant.providers import ProviderUnavailable
+from assistant.safety import UnsafeRequest
 from assistant.schema import describe
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
@@ -87,6 +89,23 @@ def _search_response(
             flight,
             message='Smart search is unavailable right now — pick a seat on the map.',
             ok=False,
+            selected=keep,
+        )
+    except UnsafeRequest:
+        # Nothing about why: a screening message that explains itself is a
+        # tutorial for the next attempt.
+        return _booking_response(
+            request, flight, message=UNSAFE_REPLY, ok=False, selected=keep
+        )
+
+    # A question wants an answer, not a selection. Every number in the reply
+    # is counted from the database; the model only says what to count.
+    if query.intent in ('count', 'list', 'status'):
+        return _booking_response(
+            request,
+            flight,
+            message=answers.answer(flight, query),
+            ok=True,
             selected=keep,
         )
 

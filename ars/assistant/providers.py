@@ -65,6 +65,30 @@ def embed(text: str) -> list[float]:
     return list(vectors[0])
 
 
+def write(system: str, prompt: str) -> str:
+    """Free-text generation, used only to phrase facts we already hold.
+
+    Nothing here is trusted: the caller checks the wording against the facts
+    before it reaches a passenger.
+    """
+    try:
+        response = _client().chat(
+            model=GENERATION_MODEL,
+            messages=[
+                {'role': 'system', 'content': system},
+                {'role': 'user', 'content': prompt},
+            ],
+            options={'temperature': 0.3},
+            think=False,
+            keep_alive=KEEP_ALIVE,
+        )
+        return (response['message']['content'] or '').strip()
+    except ProviderUnavailable:
+        raise
+    except Exception as exc:
+        raise ProviderUnavailable(f'phrasing failed: {exc}') from exc
+
+
 def extract_json(prompt: str, json_schema: dict, system: str = '') -> dict:
     """Run constrained generation, returning JSON conforming to `json_schema`.
 

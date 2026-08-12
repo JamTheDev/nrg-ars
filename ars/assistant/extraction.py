@@ -11,7 +11,7 @@ from dataclasses import replace
 
 from django.conf import settings
 
-from assistant import providers, vocabulary
+from assistant import prompts, providers, safety, vocabulary
 from assistant.schema import SeatQuery, seat_query_json_schema
 
 POSITIONS = ('window', 'aisle', 'middle')
@@ -42,6 +42,25 @@ POSITION_WORDS = (
     r'|middle|centre|center|between)\b'
 )
 
+# Questions look like questions. The model muddles "how many window seats are
+# there?" with "give me a window seat" often enough to check the words.
+# "what seats are in the middle section" wants the seats named, not counted.
+# "the middle section" is a place in the cabin; "a middle seat" is a seat type.
+# The model collapses them however the prompt is worded, so the distinction is
+# enforced here.
+MIDDLE_SECTION = (
+    r'\bmiddle\s+(section|part|third)\b'
+    r'|\b(middle|centre|center)\s+of\s+the\s+(plane|aircraft|cabin)\b'
+    r'|\bhalfway\s+down\b'
+)
+
+LIST_WORDS = r'\b(what|which|list|show me|name)\b[^?]*\bseats?\b'
+
+QUESTION_WORDS = (
+    r'(\?|\b(how many|how much|how full|what|when|where|which|is there|are there'
+    r'|do you have|any left|status|available)\b)'
+)
+
 TOGETHER_WORDS = (
     r'\b(together|one row|same row|single row|next to|beside|side by side'
     r'|adjacent|family|group|party|as a unit)\b'
@@ -52,108 +71,31 @@ COUNT_WORDS = (
     r'|couple|pair|both|twins?)\b'
 )
 
-# The examples matter as much as the rules: without them a small model answers
-# "near the front" with a row number in the trillions. See the plan doc.
-SYSTEM_PROMPT = """\
-Convert a passenger's seat request into filters for a cabin of {rows} rows, \
-columns {first}-{last}.
-Row 1 is the front, row {rows} is the back.
-position: "window", "aisle", "middle", or null. "middle" means a seat with a \
-passenger on each side. It does NOT mean the centre of the aircraft.
-"the middle of the plane", "the centre of the cabin", "halfway down" describe \
-rows, not a seat type: min_row {mid_start}, max_row {mid_end}, and position \
-stays null unless a seat type is also named.
-min_row/max_row: integers 1-{rows}, or null. Set both only for an explicit row \
-or range, like "row 12" or "rows 5 to 9".
-"front" means max_row {front}. "back" means min_row {back}.
-toward: "front" or "back" when the passenger wants to be as near that end as \
-possible ("furthest back", "as far forward as you can", "the very last row"), \
-otherwise null.
-side: "left" or "right" ONLY when the passenger says so. Never infer it. \
-Facing forward, columns {first}-{mid_col} are the left side, \
-{next_col}-{last} the right.
-party: how many seats they need, 1-{max_party}, when they say so \
-("for 6 people", "seats for the two of us"), otherwise null.
-together: true when they want the seats as a group ("one row", "together", \
-"next to each other", "for a family"), otherwise false. It is not a seat type: \
-never answer it with position "middle".
-random: true when the passenger does not mind which of the matching seats they \
-get ("random", "any seat", "surprise me", "you pick"), otherwise false. random \
-never cancels a constraint: if they also say where they want to sit, keep the \
-rows and position AND set random true.
-Always output all eight keys. Use null for anything the passenger did not ask for.
-Examples:
-"window near the front" -> \
-{{"position":"window","min_row":null,"max_row":{front},"toward":null,"side":null,"party":null,"together":false,"random":false}}
-"aisle at the back" -> \
-{{"position":"aisle","min_row":{back},"max_row":null,"toward":null,"side":null,"party":null,"together":false,"random":false}}
-"furthest back window seat" -> \
-{{"position":"window","min_row":null,"max_row":null,"toward":"back","side":null,"party":null,"together":false,"random":false}}
-"seat in row 12" -> \
-{{"position":null,"min_row":12,"max_row":12,"toward":null,"side":null,"party":null,"together":false,"random":false}}
-"middle seat" -> \
-{{"position":"middle","min_row":null,"max_row":null,"toward":null,"side":null,"party":null,"together":false,"random":false}}
-"a random seat in the middle of the plane" -> \
-{{"position":null,"min_row":{mid_start},"max_row":{mid_end},"toward":null,"side":null,"party":null,"together":false,"random":true}}
-"middle of the aircraft near a window" -> \
-{{"position":"window","min_row":{mid_start},"max_row":{mid_end},"toward":null,"side":null,"party":null,"together":false,"random":false}}
-"surprise me" -> \
-{{"position":null,"min_row":null,"max_row":null,"toward":null,"side":null,"party":null,"together":false,"random":true}}
-"random seat at the back of the plane" -> \
-{{"position":null,"min_row":{back},"max_row":null,"toward":null,"side":null,"party":null,"together":false,\
-"random":true}}
-"any window seat up front" -> \
-{{"position":"window","min_row":null,"max_row":{front},"toward":null,"side":null,"party":null,"together":false,\
-"random":true}}
-"anything" -> \
-{{"position":null,"min_row":null,"max_row":null,"toward":null,"side":null,\
-"party":null,"together":false,"random":false}}
-"window seats for 6 people" -> \
-{{"position":"window","min_row":null,"max_row":null,"toward":null,"side":null,\
-"party":6,"together":false,"random":false}}
-"6 seats for a family in one row" -> \
-{{"position":null,"min_row":null,"max_row":null,"toward":null,"side":null,\
-"party":6,"together":true,"random":false}}
-"aisle seat on the right" -> \
-{{"position":"aisle","min_row":null,"max_row":null,"toward":null,"side":"right","party":null,\
-"random":false}}\
-"""
-
-
-def system_prompt() -> str:
-    rows = settings.CABIN_ROWS
-    columns = settings.CABIN_COLUMNS
-    return SYSTEM_PROMPT.format(
-        rows=rows,
-        first=columns[0],
-        last=columns[-1],
-        front=max(1, rows // 3),
-        back=rows - rows // 3 + 1,
-        mid_start=rows // 3 + 1,
-        mid_end=rows - rows // 3,
-        mid_col=columns[len(columns) // 2 - 1],
-        next_col=columns[len(columns) // 2],
-        max_party=settings.MAX_PARTY_SIZE,
-    )
-
-
 def extract(prose: str) -> SeatQuery:
     """Turn a passenger's phrasing into a validated SeatQuery.
 
-    Raises ProviderUnavailable if Ollama is unreachable; callers degrade to the
-    ordinary seat map rather than surfacing an error.
+    Raises ProviderUnavailable if Ollama is unreachable, and UnsafeRequest if
+    the message reads as an injection attempt. Callers degrade to the ordinary
+    seat map rather than surfacing either as an error.
     """
     text = (prose or '').strip()
     if not text:
         return SeatQuery()
 
-    raw = providers.extract_json(text, seat_query_json_schema(), system=system_prompt())
+    # Screened before it is treated as a request at all.
+    safety.check(text)
+
+    raw = providers.extract_json(
+        text, seat_query_json_schema(), system=prompts.extraction_system()
+    )
     query = _validate(raw)
     query = _drop_unsaid_side(query, text)
     query = _drop_unsaid_band(query, text)
     query = _drop_unsaid_toward(query, text)
     query = _drop_unsaid_position(query, text)
     query = _drop_unsaid_together(query, text)
+    query = _settle_intent(query, text)
+    query = _middle_means_rows(query, text)
     query = _drop_unsaid_party(query, text)
 
     # Only ask the vocabulary index about phrasing the model made nothing of.
@@ -179,6 +121,40 @@ def _drop_unsaid_side(query: SeatQuery, prose: str) -> SeatQuery:
     if re.search(SIDE_WORDS[query.side], prose, re.IGNORECASE):
         return query
     return replace(query, side=None)
+
+
+def _middle_means_rows(query: SeatQuery, prose: str) -> SeatQuery:
+    """"The middle section" is a place, not a seat type."""
+    if not re.search(MIDDLE_SECTION, prose, re.IGNORECASE):
+        return query
+
+    rows = settings.CABIN_ROWS
+    changes = {}
+    if query.position == 'middle':
+        changes['position'] = None
+    if query.min_row is None and query.max_row is None:
+        changes |= {'min_row': rows // 3 + 1, 'max_row': rows - rows // 3}
+    return replace(query, **changes) if changes else query
+
+
+def _settle_intent(query: SeatQuery, prose: str) -> SeatQuery:
+    """Decide question from request by how it was phrased.
+
+    Getting this backwards is the rudest failure available: answering "give me
+    a window seat" with a head count, or selecting a seat for someone who only
+    asked how many were left. Both directions are corrected, because the words
+    are a better signal than the model's own classification.
+    """
+    asked = re.search(QUESTION_WORDS, prose, re.IGNORECASE) is not None
+    wants_names = re.search(LIST_WORDS, prose, re.IGNORECASE) is not None
+
+    if wants_names:
+        return replace(query, intent='list')
+    if asked and query.intent == 'find':
+        return replace(query, intent='count')
+    if not asked and query.intent in ('count', 'list', 'status'):
+        return replace(query, intent='find')
+    return query
 
 
 def _drop_unsaid_position(query: SeatQuery, prose: str) -> SeatQuery:
@@ -278,6 +254,10 @@ def _validate(raw: dict) -> SeatQuery:
     max_row 1000000000000000 -- which a 1.7B model did, before the schema
     bounded it -- must not reach the ORM as a filter that matches everything.
     """
+    intent = raw.get('intent')
+    if intent not in ('find', 'count', 'list', 'status'):
+        intent = 'find'
+
     position = raw.get('position')
     if position not in POSITIONS:
         position = None
@@ -310,6 +290,7 @@ def _validate(raw: dict) -> SeatQuery:
         min_row, max_row = max_row, min_row
 
     return SeatQuery(
+        intent=intent,
         position=position,
         min_row=min_row,
         max_row=max_row,

@@ -8,6 +8,24 @@ seat search is structured.
 - **Auth:** none — kiosk-style, a passenger name is typed at booking time
 - **Scope:** many flights, one shared cabin layout, single class
 
+| | Section | The short version |
+|---|---|---|
+| 1 | [Domain model](#1-domain-model) | One shared seat catalog; availability is derived, never stored |
+| 2 | [Displaying seats](#2-core-requirement-1--display-available-seating) | Web map and text print share one query |
+| 3 | [First available](#3-core-requirement-2--assign-the-first-available-seat) | `Meta.ordering` defines "first" |
+| 4 | [A specific seat](#4-core-requirement-3--assign-a-specific-seat) | Four failure modes, four messages |
+| 5 | [Concurrency](#5-concurrency) | Everyone tries; the database decides |
+| 6 | [HTTP and htmx](#6-http--htmx-interaction-design) | Fragments, the kiosk camera, selection state |
+| 7 | [The AI assistant](#7-the-ai-assistant) | Facts through the ORM, models for language only |
+| 8 | [Layout](#8-directory-layout) | Where things live |
+| 9 | [Dependencies](#9-dependencies) | Five packages, two of them optional |
+| 10 | [Testing](#10-testing-strategy) | What is covered, and what cannot be |
+| 11 | [Decisions and limits](#11-decisions-and-limits) | What was chosen, and what is knowingly missing |
+
+New to the assistant? Read §7, then
+[docs/plans/08](docs/plans/08-natural-language-search.md) for the log of every
+way it was wrong before it was right.
+
 ---
 
 ## 1. Domain Model
@@ -420,7 +438,7 @@ CSRF is handled globally by `hx-headers` on `<body>` in `base.html`.
 
 ---
 
-## 7. Natural-Language Seat Search
+## 7. The AI Assistant
 
 > **Design note.** This feature is **not** document retrieval, and building it as
 > classic RAG would make it wrong. Embedding seat and booking rows and searching
@@ -481,6 +499,30 @@ than the model choice does**: it `require`s every field, because a small model
 omits keys it is unsure about, and it bounds the rows against `CABIN_ROWS`,
 because an unbounded one answered "near the front" with `max_row` in the
 trillions. See `docs/plans/08-natural-language-search.md` §3.2.
+
+### Step 0 — Screening, cheapest layer first
+
+Every message is screened before it is treated as a request
+(`assistant/safety.py`), in three layers:
+
+1. phrases with no innocent reading at a kiosk — "ignore your instructions",
+   "you are now…", pasted SQL — are refused outright, with no model call
+2. ordinary seat talk is allowed outright, which keeps a second of latency off
+   every normal query
+3. only what neither recognises is put to the model, which labels the **topic**
+   as seats, flight or other. Asked "is this unsafe?" the same model answered
+   yes to everything, including "window seat near the front"; asked what a
+   message is *about*, it sorts kiosk talk from everything else reliably.
+
+A refusal says only *"Uh-oh! I ran into something. Please try again."* — a
+screening message that explains itself is a tutorial for the next attempt. The
+check **fails open**: if Ollama is unreachable the message passes, because the
+real boundary is that the model cannot emit SQL, and a screening step that
+takes the kiosk down when Ollama restarts is worse than the attack.
+
+All model instructions live in `assistant/prompts.py`. Prompts are prose that
+behaves like code, and keeping them in one file means the guard can be read
+beside the extraction prompt it protects.
 
 ### Step 1b — Guards: the model invents claims nobody made
 
@@ -723,37 +765,33 @@ every run, so it will never reproduce a stale-cache bug.
 
 ---
 
-## 11. Open Decisions
+## 11. Decisions and Limits
 
-- ~~**No route for `/` yet**~~ — resolved: `/` renders the flight list and each
-  row links to `/flights/<id>/`, the pan/zoom seat map.
-- **Selection is still not a hold.** Seats picked in the panel are reserved for
+### Decided
+
+- **`/` is the flight list**, and each bookable row opens `/flights/<id>/`.
+- **Selection is not a hold.** Seats picked in the panel are reserved for
   nobody until *Confirm booking* commits; another kiosk can take one in the
-  meantime, and the passenger finds out at commit. That is the §5 policy
-  working as designed, not a gap.
+  meantime, and the passenger finds out at commit. That is §5 working, not a
+  gap.
 - **A party is all-or-nothing.** If any seat in a multi-seat request was just
-  taken, the whole booking rolls back rather than partially succeeding —
-  serving two of three passengers and charging for it is worse than refusing.
-- ~~**No `print_flight` command yet**~~ — resolved: `print_flight` renders the
-  same `Cabin` as text, sharing the availability query with the web view.
-  `--available-only` lists free designations for piping.
-- **Party size and selection are one value.** The stepper displays the number of
-  selected seats; raising it asks the server for another seat beside the party,
-  lowering it drops the newest pick in the page.
-- **No cancellation.** A booking is immediate and final.
-- **`SEAT_FARE` is a flat placeholder** in settings so the panel can show a
-  total. Real pricing belongs on `Flight` (or a fare class), which is a
-  migration, not a config edit.
-- **No seat holds.** Deliberately scoped out; see the selection note above.
-- **Natural-language search is within one flight.** `SeatQuery` carries
-  `flight_number` and `destination` for a future search across flights; this
-  release leaves them unused rather than removing them.
-- **An invented seat type survives the guards.** "seats for six" comes back as
-  *window* seats. Unlike sides, counts and ends, position synonyms are
-  open-ended, which is exactly what the vocabulary index is for — a closed-set
-  guard tight enough to catch this would break "by the porthole". Revisit by
-  consulting the index before dropping, if it grates.
-- **The vocabulary is ten phrases.** It earns its place as a fallback, but the
-  model now handles most of what it covers.
-- **`DEBUG = True`** and no deployment target chosen.
-- **Second aircraft layout** would trigger the `Seat` → `Aircraft` migration in §1.
+  taken, the whole booking rolls back — serving two of three passengers and
+  charging for it is worse than refusing.
+- **Party size and selection are one value.** The stepper displays the number
+  of selected seats.
+- **Times are stored in UTC and displayed in `Asia/Manila`**, the kiosk's own
+  time, which is what a passenger reads on a boarding pass.
+- **The assistant fails open.** With no Ollama, screening passes, search is
+  unavailable, and booking is untouched.
+
+### Knowingly missing
+
+| | Why, and what it would take |
+|---|---|
+| No cancellation, no seat holds | Scoped out. Both need a booking lifecycle, not just a delete |
+| `SEAT_FARE` is a flat placeholder | Real pricing belongs on `Flight` or a fare class — a migration, not a config edit |
+| Search covers one flight | `SeatQuery` already carries `flight_number` and `destination` for a cross-flight search |
+| The assistant can invent a seat *type* | "seats for six" comes back as window seats. Position synonyms are open-ended, which is what the vocabulary index exists for; a closed-set guard tight enough to catch it would break "by the porthole" |
+| The vocabulary is ten phrases | It earns its place as a fallback, and the model handles most of what it covers |
+| `DEBUG = True`, no deployment target | Both must change before this is served to anyone |
+| One cabin layout | A second aircraft turns `Seat` into a per-`Aircraft` catalog — the migration described in §1 |

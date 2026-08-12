@@ -1,6 +1,6 @@
 # Plan — "Reserve for ‹ N ›" auto seat selection
 
-Status: **proposed**, not started.
+Status: **built**, PR #8.
 Target branch: `feature/party-size-auto-select` → PR into `dev`.
 
 Turns the inert party-size stepper into the fastest path through the kiosk:
@@ -262,13 +262,14 @@ bad `party` values produce the error banner at 200.
 
 ---
 
-## 10. Open questions
+## 10. How they were settled
 
-1. **Decrement policy** — drop the most recently added seat (proposed), or
-   re-pick a tighter block for the smaller party? Dropping is predictable;
-   re-picking gives a better final arrangement. Proposal: drop.
-2. **`MAX_PARTY_SIZE = 6`** — right cap for a kiosk, or allow more and let the
-   scattered tier handle it?
-3. **Does the panel need to name the tier?** "Seated together" vs "Best
-   available — not seated together" is honest, but it is another string to
-   design. Proposal: show it only when the party is split.
+Every question this plan raised was answered by building it:
+
+- **Decrementing drops the most recently added seat**, and does it in the page
+  without asking the server. Predictable beats optimal, and a round trip risks
+  rearranging seats the passenger deliberately chose.
+- **`MAX_PARTY_SIZE = 6`** — one full row. Beyond that even "everyone in the
+  same row" is impossible, so the pick is guaranteed to scatter.
+- **The panel names the tier only when the party is split.** Seating people
+  together needs no explanation; failing to needs one.
