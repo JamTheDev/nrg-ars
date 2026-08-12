@@ -104,7 +104,12 @@ def flight_rows() -> list[FlightRow]:
     from `Booking`, so it can never drift out of sync.
     """
     capacity = cabin_capacity()
-    flights = Flight.objects.annotate(booked_count=Count('bookings'))
+    # Order explicitly. Meta.ordering is ignored once a query groups for an
+    # aggregate, so the annotate() below silently drops it -- the board looked
+    # chronological only because the demo flights were seeded in that order.
+    flights = Flight.objects.annotate(booked_count=Count('bookings')).order_by(
+        'departs_at', 'number'
+    )
     return [
         FlightRow(
             flight=flight,

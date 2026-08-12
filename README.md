@@ -62,8 +62,10 @@ The departures screen reads real rows, so an empty database shows an empty list:
 uv run ars/manage.py seed_flights
 ```
 
-Idempotent on flight number — re-running it never duplicates a flight. Flights
-can also be added through the admin.
+Seven flights spread over the next two weeks. Departures are relative to
+*now*, and re-running **refreshes** a schedule that has fallen into the past —
+demo data ages, and a board of departed flights is unbookable. Existing flights
+are updated rather than duplicated, and their bookings are untouched.
 
 ### 6. Print a flight (core requirement 1)
 

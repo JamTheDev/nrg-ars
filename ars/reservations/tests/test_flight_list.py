@@ -13,11 +13,14 @@ from reservations.models import Booking, Flight, Passenger, Seat
 class FlightRowsTests(TestCase):
     def setUp(self) -> None:
         now = timezone.now()
+        # Numbers deliberately sort the opposite way to the departures: the
+        # first version of this test used PR101/PR205, which read the same
+        # either way and passed while the board was sorted by nothing at all.
         self.later = Flight.objects.create(
-            number='PR205', origin='MNL', destination='DVO', departs_at=now + timedelta(days=2)
+            number='AA999', origin='MNL', destination='DVO', departs_at=now + timedelta(days=2)
         )
         self.sooner = Flight.objects.create(
-            number='PR101', origin='MNL', destination='CEB', departs_at=now + timedelta(hours=3)
+            number='ZZ001', origin='MNL', destination='CEB', departs_at=now + timedelta(hours=3)
         )
 
     def test_seats_are_seeded_from_the_cabin_layout(self) -> None:
@@ -26,7 +29,7 @@ class FlightRowsTests(TestCase):
 
     def test_rows_are_ordered_by_departure(self) -> None:
         numbers = [row.flight.number for row in selectors.flight_rows()]
-        self.assertEqual(numbers, ['PR101', 'PR205'])
+        self.assertEqual(numbers, ['ZZ001', 'AA999'])
 
     def test_availability_is_derived_from_bookings(self) -> None:
         passenger = Passenger.objects.create(full_name='Ada Lovelace')
@@ -34,9 +37,9 @@ class FlightRowsTests(TestCase):
             Booking.objects.create(flight=self.sooner, seat=seat, passenger=passenger)
 
         rows = {row.flight.number: row for row in selectors.flight_rows()}
-        self.assertEqual(rows['PR101'].seats_available, 177)
+        self.assertEqual(rows['ZZ001'].seats_available, 177)
         # Seats are a shared catalog, so booking one flight cannot affect another.
-        self.assertEqual(rows['PR205'].seats_available, 180)
+        self.assertEqual(rows['AA999'].seats_available, 180)
 
     def test_flight_list_is_two_queries_regardless_of_flight_count(self) -> None:
         # One for the catalog size, one for the annotated flights -- no N+1.
