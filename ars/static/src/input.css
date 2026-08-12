@@ -71,6 +71,48 @@
   opacity: 0.3;
 }
 
+/* The search button's loading state. htmx adds .htmx-request to the element
+   making the request, and that class only ever exists at runtime -- Tailwind
+   cannot see it, so the rules live here. A local model takes a second or two,
+   and longer on the first query after an idle period while Ollama loads it. */
+.search-busy {
+  display: none;
+}
+
+#bar-search.htmx-request .search-idle {
+  display: none;
+}
+
+#bar-search.htmx-request .search-busy {
+  display: inline-flex;
+}
+
+#bar-search.htmx-request button[type="submit"] {
+  cursor: progress;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+#bar-search.htmx-request input[name="q"] {
+  color: var(--color-slate-400);
+}
+
+.spinner {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
+
 /* Reservation side panel: off-canvas until data-open. */
 #reserve-panel {
   transform: translateX(100%);

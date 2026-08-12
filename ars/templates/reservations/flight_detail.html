@@ -119,7 +119,6 @@
           hx-get="{% url 'seat-map' flight.id %}"
           hx-target="#seat-map"
           hx-swap="outerHTML"
-          hx-indicator="#seat-search-busy"
         >
           <button
             type="button"
@@ -138,16 +137,21 @@
               placeholder="window seats for 6 people&hellip;"
               class="w-80 rounded-full border border-slate-200 py-2 pl-4 pr-10 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
             >
-            <span
-              id="seat-search-busy"
-              class="htmx-indicator absolute right-4 top-1/2 -translate-y-1/2 text-xs text-sky-600"
-            >&hellip;</span>
           </label>
 
           <button
             type="submit"
-            class="rounded-full bg-sky-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
-          >Find</button>
+            class="flex min-w-28 items-center justify-center gap-2 rounded-full bg-sky-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
+          >
+            <span class="search-idle">Find</span>
+            <span class="search-busy items-center gap-2">
+              <svg viewBox="0 0 24 24" fill="none" class="spinner h-4 w-4" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-opacity="0.3" stroke-width="3"/>
+                <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+              </svg>
+              Searching&hellip;
+            </span>
+          </button>
         </form>
       </div>
     </div>
