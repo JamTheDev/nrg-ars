@@ -290,7 +290,7 @@ Full page loads only on navigation. Every booking action swaps a fragment.
 | `GET /flights/<id>/` | `flight-detail` | Full page: seat map + booking form |
 | `POST /flights/<id>/book/` | `book-seat` | **Fragment** — updated seat map |
 | `POST /flights/<id>/book/first/` | `book-first` | **Fragment** — updated seat map |
-| `GET /flights/<id>/map/` | `seat-map` | **Fragment** — seat map, optionally with a party's seats already chosen (`?party=4&keep=12A`) |
+| `GET /flights/<id>/map/` | `seat-map` | **Fragment** — seat map, optionally with seats already chosen: `?party=4&keep=12A`, or `?q=window+seat+near+the+front` |
 
 Templates split so the fragment and the full page render the identical markup:
 
@@ -353,6 +353,25 @@ block — "together" is a ladder, and the same row across the aisle counts:
 It lives in `selectors.py` rather than JavaScript so the management commands and
 the natural-language assistant (§7) can reuse the one implementation, and so it
 is testable without a browser. Two queries, whatever the party size.
+
+### The reserve bar has two modes
+
+The same bar either counts the party by hand or takes a description. A chat
+button beside *Continue* swaps the stepper for a text box; a back arrow
+returns, and Escape steps back one thing at a time — out of the box first, then
+out of the panel.
+
+Both modes drive the same `seat-map` route, so whichever is showing, the answer
+arrives as a selection the panel and the camera already understand.
+
+### Static assets are versioned in DEBUG
+
+`{% versioned_static %}` appends the file's modification time. Django's
+development server sends static files with `Last-Modified` and no
+`Cache-Control`, so a browser may reuse a script for minutes without
+revalidating — which presents as new markup driving old JavaScript, and looks
+exactly like a broken button. Production URLs are untouched; cache-busting
+there is `collectstatic`'s job.
 
 ### Selection state and the summary panel
 
@@ -419,16 +438,21 @@ CSRF is handled globally by `hx-headers` on `<body>` in `base.html`.
 
 ```mermaid
 flowchart TD
-    A["User: 'window seat near the front to Cebu'"] --> B[Ollama: constrained JSON extraction]
-    B --> C{Valid against schema?}
-    C -- no --> D[Ask for clarification]
-    C -- yes --> E[SeatQuery dataclass]
-    E --> F[Django ORM — source of truth]
-    F --> G[Ranked available seats]
-    G --> H[Seat map fragment via htmx]
-    B -. unknown phrase .-> V[sqlite-vec vocabulary lookup]
-    V -.-> E
+    A["'window seats for 6 people'"] --> B[qwen3:1.7b, decoding constrained to the schema]
+    B --> C[_validate: clamp rows, drop invented fields]
+    C --> D[Guards: drop claims the passenger never made]
+    D --> E{Anything left?}
+    E -- no --> V[sqlite-vec vocabulary lookup]
+    V --> F
+    E -- yes --> F[SeatQuery]
+    F --> G[Django ORM — source of truth]
+    G --> H[Ranked free seats]
+    H --> I[Seat map fragment, seats already selected]
 ```
+
+The result arrives as a **selection on the ordinary seat map**, so the panel,
+the totals and the camera need to know nothing about language. `?q=` is one
+more parameter on the `seat-map` route beside `?party=` and `?keep=`.
 
 ### Step 1 — Structured extraction, never SQL
 
@@ -439,16 +463,68 @@ injection can at worst produce a strange-but-valid filter, never arbitrary SQL.
 ```python
 @dataclass(frozen=True)
 class SeatQuery:
-    flight_number: str | None = None
-    destination: str | None = None          # IATA
+    flight_number: str | None = None    # reserved for search across flights
+    destination: str | None = None      # reserved for search across flights
     position: Literal['window', 'aisle', 'middle'] | None = None
-    max_row: int | None = None
     min_row: int | None = None
+    max_row: int | None = None
+    toward: Literal['front', 'back'] | None = None   # which end to offer first
+    side: Literal['left', 'right'] | None = None     # A-C or D-F
+    party: int | None = None                          # how many seats
+    together: bool = False                            # seat them as a group
+    is_random: bool = False                           # draw, do not take the first
 ```
 
 Ollama is called with `format=<json-schema>` so decoding is constrained to the
-schema rather than parsed hopefully from prose. Fields the model invents are
-dropped; out-of-range values are clamped or rejected before the query runs.
+schema rather than parsed hopefully out of prose. **The schema does more work
+than the model choice does**: it `require`s every field, because a small model
+omits keys it is unsure about, and it bounds the rows against `CABIN_ROWS`,
+because an unbounded one answered "near the front" with `max_row` in the
+trillions. See `docs/plans/08-natural-language-search.md` §3.2.
+
+### Step 1b — Guards: the model invents claims nobody made
+
+Constrained decoding controls the *shape* of the answer, not its honesty. In
+practice the model asserts a side for "aisle seat at the back", a row band for
+"random window seat on the left", a direction for "window seats for 6 people",
+and a seat type for "6 seats for a family in one row".
+
+Asking it not to does not work — a worked counter-example taught the exact
+association it was meant to break. So each of those fields is checked against
+the passenger's own words and **dropped when unsupported**:
+
+| Guard | Accepts |
+|---|---|
+| `_drop_unsaid_side` | left, port, right, starboard |
+| `_drop_unsaid_band` | front, forward, nose… / back, rear, tail… |
+| `_drop_unsaid_toward` | the same two word sets |
+| `_drop_unsaid_party` | a digit, or one…ten, couple, pair, both |
+| `_drop_unsaid_position` | window, porthole, view, aisle, corridor, middle… |
+| `_drop_unsaid_together` | together, one row, next to, beside, family… |
+
+Two properties keep this safe. The guards **only ever remove** — one that added
+a constraint could invent one itself, and a negation would defeat it. And they
+cover **closed word sets**: naming a side, a count, an end or a grouping takes
+one of a handful of words. Explicit rows are never second-guessed; "rows 5 to 9"
+is the passenger's whatever surrounds it.
+
+`position` is the awkward one, since its synonyms are open-ended. Its list is
+deliberately wide, and anything stranger falls through to an empty query —
+which is exactly what sends it to the vocabulary index.
+
+### Step 1c — Ranking is part of the answer
+
+A filter says which seats *qualify*; three fields say which of them to offer,
+and getting this wrong answers a different question than the one asked:
+
+- **`toward`** — "as far back as possible" must not return the front-most seat
+  of the back section. Bounds and direction are separate ideas.
+- **`together`** — a party asking for one row is one request, not N requests
+  that each match. The search prefers a single row that can hold them all,
+  skips a row with a seat already taken, and falls back rather than refusing
+  when the filter makes one row impossible, as six window seats always will.
+- **`is_random`** — random samples *within* the constraint. "A random seat at
+  the back" that shuffles the whole cabin has answered half the sentence.
 
 ### Step 2 — Position is derived, not stored
 
@@ -507,8 +583,34 @@ there need a Homebrew or `uv`-managed Python.
 
 | Role | Model | Notes |
 |---|---|---|
-| Generation / extraction | `qwen3:14b` | Already installed. Strong constrained-JSON support. |
-| Embedding | `nomic-embed-text` | **Not yet installed** — `ollama pull nomic-embed-text`. 768 dimensions, matching the `vec0` table above. |
+| Generation / extraction | `qwen3:1.7b` | ~1s per query. Chosen over `qwen3:14b` by measurement, below. |
+| Embedding | `nomic-embed-text` | Installed. 768 dimensions, matching the `vec0` table above. |
+
+### Three things measurement decided
+
+**`think=False` is mandatory, not a tuning knob.** qwen3 reasons before
+answering by default. The same extraction that returns in about a second
+without thinking was still running after **sixty seconds** with it.
+
+**The small model is the right one, because the schema does the work.**
+`qwen3:14b` answers correctly but takes 6–7s warm, which reads as broken at a
+kiosk. `qwen3:1.7b` answers in ~1s — and its first attempts were garbage
+(`max_row: 1000000000000000`, `position` missing entirely) until the JSON
+schema was tightened. What fixed it was not a bigger model:
+
+- `required: [position, min_row, max_row]` — otherwise the model omits keys it
+  is unsure about
+- `minimum`/`maximum` on the rows, from `CABIN_ROWS`
+- three worked examples in the system prompt
+
+The validation layer stays regardless. A schema constrains a well-behaved
+model; it is not a guarantee, and `_validate()` clamps what arrives anyway.
+
+**`vec0` measures L2 distance, not cosine**, so the match threshold is not a
+0–1 similarity. Measured against this corpus with `nomic-embed-text`: genuine
+rephrasings land at 0.60–0.65, related-but-wrong at 0.91–0.98, and nonsense
+above 1.09. The cut sits at 0.80, in the gap. Those numbers are properties of
+the embedding model — changing it means re-measuring.
 
 The embedding dimension is baked into the virtual table. **Changing embedding
 model means dropping and rebuilding the index** — a migration, not a config edit.
@@ -520,11 +622,27 @@ machine — worth stating explicitly, since NL queries can contain personal deta
 
 ### Failure behaviour
 
-Ollama is a separate process that may be stopped. Every entry point degrades to
-the ordinary seat map rather than erroring: if extraction fails or times out
-(5s), the UI reports that smart search is unavailable and falls back to the
-normal browse-and-click flow. **The three core requirements never depend on
-Ollama running.**
+Ollama is a separate process that may be stopped, and a local model takes a
+second or two even when it is running. **The three core requirements never
+depend on it.**
+
+| Condition | Response |
+|---|---|
+| Ollama unreachable or slow (>30s) | Map unchanged, existing selection intact, "smart search is unavailable" |
+| Nothing matches | Map unchanged, selection intact, "No free window seats up to row 1" |
+| A match | Seats selected, camera flies to them, banner names what was understood |
+
+Every path returns **200 with the map**, for the same reason booking failures do
+(§6): htmx does not swap error responses, so a 4xx would leave the passenger
+staring at an unchanged page.
+
+The banner always states the filter in English — *"Aisle seats on the right as
+far back as possible."* That is not decoration: it is the only way a passenger
+can tell a misunderstanding from an empty cabin.
+
+While the request is in flight the *Find* button becomes a spinner and stops
+accepting clicks. A second of silence on a kiosk reads as a dead control — this
+project has shipped that bug more than once.
 
 ---
 
@@ -539,12 +657,16 @@ ars/
 │   ├── selectors.py          available_seats, seat_grid
 │   ├── exceptions.py         SeatTakenError, InvalidSeatError, …
 │   ├── views.py              thin — parse, delegate, render
-│   └── management/commands/print_flight.py
+│   ├── templatetags/assets.py  versioned_static
+│   └── management/commands/   print_flight, seed_flights
 ├── assistant/                ← natural-language search
-│   ├── providers.py          Ollama client boundary
-│   ├── extraction.py         prose → SeatQuery
+│   ├── providers.py          Ollama client boundary — the seam tests mock
+│   ├── extraction.py         prose → SeatQuery, plus the guards
 │   ├── vocabulary.py         sqlite-vec concept lookup
+│   ├── models.py             Concept: the authored corpus
 │   ├── schema.py             SeatQuery dataclass + JSON schema
+│   ├── migrations/           Concept table + the vec0 virtual table
+│   ├── management/commands/reindex_concepts.py
 │   └── apps.py               connection_created → load sqlite-vec
 ├── templates/
 └── static/
@@ -577,10 +699,27 @@ CLI (see README).
 |---|---|
 | Seat parsing | Table-driven over the four failure modes in §4 |
 | First-available | Seed partial bookings, assert exact seat chosen |
-| Concurrency | Two threads booking one seat; assert exactly one `Booking` row and one `SeatTakenError` — a real assertion, since `select_for_update` is a no-op here |
+| Concurrency | A booked seat re-booked raises `SeatTakenError` and leaves one row; the real race was demonstrated with two browsers rather than two threads |
 | Seat map | Query count assertion to catch N+1 regressions across 180 seats |
-| NL extraction | Fixed prose → expected `SeatQuery`, with the Ollama call mocked |
-| Degradation | Ollama unreachable → seat map still renders |
+| Party seating | Exact seats asserted per tier: one block, one row, adjacent rows, scattered |
+| `print_flight` | The rendering compared line for line — there the format *is* the deliverable |
+| NL extraction | Fixed model output → expected `SeatQuery`, mocked at `providers.py` |
+| Guards | Each drops an unsaid claim and keeps a said one, word-boundary matched |
+| Degradation | Provider raising → map still renders, selection survives, 200 |
+| Injection | `'; DROP TABLE …` leaves the database intact and still bookable |
+
+**No test may require Ollama to be running.** The provider is a single file
+precisely so the suite can mock that seam.
+
+**What the suite cannot cover** is whether the model extracts a given phrase
+correctly — asserting that would put a 1.7B model in CI. Those phrasings are
+verified by hand and listed in `docs/plans/08-natural-language-search.md`, which
+also carries the re-check command to run after touching the prompt.
+
+**Browser-driven checks** (Playwright, real input) cover what a test client
+cannot: pointer capture, drag versus tap, the camera, and the booking
+round-trip. One blind spot to remember — Playwright launches a fresh profile
+every run, so it will never reproduce a stale-cache bug.
 
 ---
 
@@ -606,5 +745,15 @@ CLI (see README).
   total. Real pricing belongs on `Flight` (or a fare class), which is a
   migration, not a config edit.
 - **No seat holds.** Deliberately scoped out; see the selection note above.
+- **Natural-language search is within one flight.** `SeatQuery` carries
+  `flight_number` and `destination` for a future search across flights; this
+  release leaves them unused rather than removing them.
+- **An invented seat type survives the guards.** "seats for six" comes back as
+  *window* seats. Unlike sides, counts and ends, position synonyms are
+  open-ended, which is exactly what the vocabulary index is for — a closed-set
+  guard tight enough to catch this would break "by the porthole". Revisit by
+  consulting the index before dropping, if it grates.
+- **The vocabulary is ten phrases.** It earns its place as a fallback, but the
+  model now handles most of what it covers.
 - **`DEBUG = True`** and no deployment target chosen.
 - **Second aircraft layout** would trigger the `Seat` → `Aircraft` migration in §1.

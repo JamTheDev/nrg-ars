@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from assistant import extraction
+from assistant.providers import ProviderUnavailable
+from assistant.schema import describe
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
@@ -67,6 +70,57 @@ def _booking_response(
     )
 
 
+def _search_response(
+    request: HttpRequest, flight: Flight, prose: str, party: str | None, keep: list[str]
+) -> HttpResponse:
+    """Answer a natural-language seat request.
+
+    Every failure returns the map unchanged with the passenger's existing
+    selection intact: smart search is a shortcut, and losing your seats
+    because a model was slow would make it a liability.
+    """
+    try:
+        query = extraction.extract(prose)
+    except ProviderUnavailable:
+        return _booking_response(
+            request,
+            flight,
+            message='Smart search is unavailable right now — pick a seat on the map.',
+            ok=False,
+            selected=keep,
+        )
+
+    # "window seats for 6 people" carries its own count. The stepper is the
+    # fallback, not the other way round: the sentence is the more recent thing
+    # the passenger said.
+    if query.party:
+        wanted = query.party
+    else:
+        try:
+            wanted = max(1, min(settings.MAX_PARTY_SIZE, int(party)))
+        except (TypeError, ValueError):
+            wanted = 1
+
+    seats = selectors.search_seats(flight, query, limit=wanted)
+    if not seats:
+        return _booking_response(
+            request,
+            flight,
+            message=f'No free {describe(query)} on this flight.',
+            ok=False,
+            selected=keep,
+        )
+
+    found = describe(query)
+    return _booking_response(
+        request,
+        flight,
+        message=f'{found[0].upper()}{found[1:]}.',
+        ok=True,
+        selected=[seat.designation for seat in seats],
+    )
+
+
 @require_GET
 def seat_map(request: HttpRequest, flight_id: int) -> HttpResponse:
     """The cabin fragment, optionally with a party's seats already chosen.
@@ -78,6 +132,10 @@ def seat_map(request: HttpRequest, flight_id: int) -> HttpResponse:
     flight = get_object_or_404(Flight, pk=flight_id)
     party = request.GET.get('party')
     keep = [value for value in request.GET.get('keep', '').split(',') if value.strip()]
+
+    prose = request.GET.get('q', '').strip()
+    if prose:
+        return _search_response(request, flight, prose, party, keep)
 
     if party is None:
         return _booking_response(request, flight, message='', ok=True, selected=keep)

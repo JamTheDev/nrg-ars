@@ -1,262 +1,313 @@
-# Plan — Natural-language seat search
+# Natural-language seat search
 
-Status: **proposed**, not started.
-Target branch: `feature/nl-seat-search` → PR into `dev`.
+Status: **built**, PR #12. Written as a plan, rewritten as an as-built record
+once the thing existed and started being wrong in instructive ways.
 
-Implements ARCHITECTURE.md §7, which is currently designed in full and built as
-four modules of `NotImplementedError`.
+Type *"window seats for 6 people"* into the seat map and six window seats come
+back selected, with the camera flown to them.
 
 ---
 
-## 1. What exists today
+## 1. What it does
 
-```
-assistant/
-├── schema.py       SeatQuery dataclass + JSON schema   ← real
-├── apps.py         connection_created → load sqlite-vec ← real
-├── providers.py    embed(), extract_json()             ← raise NotImplementedError
-├── extraction.py   extract(), _validate()              ← raise NotImplementedError
-└── vocabulary.py   resolve(), reindex()                ← raise NotImplementedError
-```
+One phrase in, a seat selection out. It is a **searcher, not a chatbot**: there
+is no dialogue state, no memory between queries, and no conversation to
+maintain.
 
-Nothing imports the app, there is no view, no URL, and `assistant/migrations/`
-holds only `__init__.py` — so the `vec0` virtual table does not exist either.
+Phrases it handles today, each verified by hand against the live model:
 
-### The environment is further along than the doc says
-
-Verified on this machine:
-
-| Prerequisite | State |
+| Phrase | Result |
 |---|---|
-| Ollama server | **running** |
-| `qwen3:14b` (extraction) | **installed** |
-| `nomic-embed-text` (embedding) | **installed** — ARCHITECTURE §7 still says it is not |
-| `sqlite_vec` package | installed |
-| `sqlite3.enable_load_extension` | available |
-
-So the "not yet installed" note in §7 is stale and should be corrected as part
-of this work. Nothing blocks the build.
+| `window seat near the front` | `1A` |
+| `farthest back seat near the aisle on the right` | `30D` |
+| `random seat in the middle of the plane` | a different seat in rows 11–20 each time |
+| `window seats for 6 people` | `1A 1F 2A 2F 3A 3F`, stepper set to 6 |
+| `6 seats for a family in one row` | a whole free row |
+| `by the porthole` | `1A` — resolved through the vector vocabulary |
 
 ---
 
-## 2. The design being implemented, restated
-
-This is **not** RAG over seat rows, and building it that way would make it
-wrong: similarity cannot enforce "row under 10", availability changes on every
-booking so an index is stale immediately, and the database already answers
-these questions exactly.
-
-**Facts go through the ORM. Vector search is used only where meaning is
-genuinely fuzzy** — mapping loose phrasing onto the system's own vocabulary.
+## 2. How it works
 
 ```
-"window seat near the front"
-        │
-        ▼
-qwen3:14b, constrained by SeatQuery's JSON schema
-        │
-        ├── unknown phrase ──► sqlite-vec concept lookup ──┐
-        ▼                                                  │
-SeatQuery(position='window', max_row=10)  ◄────────────────┘
-        │
-        ▼
-Django ORM over the seat catalog and this flight's bookings
-        │
-        ▼
-ranked free seats ──► the existing seat-map fragment, matches pre-selected
+prose
+  │
+  ▼
+qwen3:1.7b, decoding constrained to the SeatQuery JSON schema      (~1s)
+  │
+  ▼
+_validate()      clamp rows, drop invented fields and enum values
+  │
+  ▼
+guards           drop claims the passenger never made               (§4)
+  │
+  ├── query still empty? ──► sqlite-vec vocabulary lookup           (~1.4s)
+  ▼
+SeatQuery  →  selectors.search_seats()  →  the same seat-map fragment
+                                            everything else uses
 ```
+
+**It is one more parameter, not a new feature surface.** `?q=` sits beside
+`?party=` and `?keep=` on the existing `seat-map` endpoint, so a match arrives
+as a selection, the client adopts it exactly as it adopts a party pick, and the
+camera focuses it. No new template, no second selection mechanism.
 
 **The LLM never emits SQL and never sees the database.** Its only output is a
-validated `SeatQuery`. That is the security boundary: a prompt injection can at
-worst produce a strange-but-valid filter, never arbitrary SQL.
+`SeatQuery`. That is the security boundary: a prompt injection can at worst
+produce a strange-but-valid filter. There is a test asserting the database
+survives `'; DROP TABLE reservations_booking; --` and still books afterwards.
+
+### Where vector search is, and is not
+
+Availability comes from the ORM. Similarity cannot enforce "row under 10", and
+an index over seats would be stale on every booking. The embedded corpus is
+**authored, static, and consulted only for phrasing the model made nothing of**
+— it costs an embedding call, so it is a fallback, not a pipeline step.
 
 ---
 
-## 3. Where it plugs into what already exists
+## 3. The problem log
 
-The seat map already has everything needed to *show* a result:
+Everything below was found by using the feature, not by testing it. They are
+recorded because the fixes are not obvious from the code alone, and because the
+same mistakes are available to anyone who changes this.
 
-- `GET /flights/<id>/map/` returns the cabin fragment with chosen seats pressed
-- the client adopts whatever the server rendered as pressed, after any swap
-- the camera flies to the selection
+### 3.1 Thinking models: a 60-second answer
 
-So natural-language search is **another way to drive the same endpoint**, not a
-new rendering path. `?q=window+seat+near+the+front` sits beside `?party=` and
-`?keep=`, and everything downstream is already built and verified.
+**Symptom.** Extraction never returned; the request timed out.
 
-That is the whole integration. No new template, no new selection mechanism, no
-new camera behaviour.
+**Cause.** qwen3 reasons before answering by default. The same call that
+returns in about a second with `think=False` was still running after sixty.
 
-### UI
+**Fix.** `think=False` on every call. This is not a tuning knob — without it
+the feature does not work at all.
 
-A single text input in the seat-map header:
+### 3.2 The model was not the problem; the schema was
 
-```
-[ window seat near the front            ] ⏎
-```
+**Symptom.** `qwen3:1.7b` answered *"window seat near the front"* with
+`{"max_row": 1000000000000000}` and no `position` at all. `qwen3:14b` answered
+correctly but took **6–7 seconds warm**, which reads as broken at a kiosk.
 
-`hx-get` to the same `seat-map` route, `hx-target="#seat-map"`. On success the
-matching seats come back pressed and the camera flies to them. On failure the
-map returns unchanged with a banner.
+**Cause.** The JSON schema listed its properties but did not `require` them and
+did not bound them. A small model omits keys it is unsure about and invents
+magnitudes it has no reason to.
 
----
+**Fix.** `required: [...]` for every field, `minimum`/`maximum` on rows from
+`CABIN_ROWS`, and worked examples in the system prompt. The same 1.7B model
+then answered every test phrase correctly, in about a second.
 
-## 4. Modules to fill in
+> Worth internalising: the instinct was "the small model is too weak". The
+> measurement said the schema was too loose. Reach for the schema first.
 
-### `providers.py` — the only place that talks to Ollama
+The validation layer stays regardless. A schema constrains a well-behaved
+model; it does not guarantee one.
+
+### 3.3 sqlite-vec measures L2, not cosine
+
+**Symptom.** `vocabulary.resolve()` returned `None` for phrases it obviously
+should have matched.
+
+**Cause.** The threshold was 0.55, calibrated for a cosine similarity in
+0–1. `vec0` defaults to **L2 distance**, which is not on that scale.
+
+**Fix.** Measured the corpus with `nomic-embed-text` and cut in the gap:
+
+| | distance |
+|---|---|
+| genuine rephrasing | 0.60 – 0.65 |
+| related but wrong | 0.91 – 0.98 |
+| nonsense | 1.09 + |
+
+`MAX_DISTANCE = 0.80`. Those numbers belong to the embedding model — changing
+it means re-measuring, not guessing.
+
+### 3.4 "Farthest back" returned row 21
+
+**Symptom.** *"farthest back seat near the window"* selected `21A`.
+
+**Two causes, stacked.**
+
+1. The prompt taught that *"back"* means `min_row 21`, so a superlative came
+   back as `min_row 21` **and** `max_row 21` — pinning the passenger to the row
+   where the back merely begins, and excluding row 30 entirely.
+2. Ranking was always front-to-back, so even a correct rows-21-to-30 filter
+   would have offered `21A`: the front-most seat of the back section.
+
+**Fix.** `SeatQuery.toward`. Bounds say which seats *qualify*; `toward` says
+which end to offer *first*. That distinction is the whole difference between
+"at the back" and "as far back as possible".
+
+### 3.5 "Middle" is two different words
+
+**Symptom.** *"a random seat in the middle of the plane"* returned `1B`. Worse,
+*"middle of the aircraft near a window"* returned a middle seat and **dropped
+"window" entirely**.
+
+**Cause.** In a cabin, *middle* means both a seat between two others and the
+centre of the aircraft. The model collapsed them into the seat type.
+
+**Fix.** The prompt separates the senses and gives the row band for the
+positional one, so "middle seat" stays a B/E seat while "middle of the plane"
+becomes rows 11–20 — and the two compose.
+
+### 3.6 There was no notion of a side
+
+**Symptom.** *"aisle on the right side"* returned the left-hand aisle seat.
+
+**Cause.** "Aisle" is columns C **and** D — opposite sides of the same aisle —
+and column order always returned C. Nothing in `SeatQuery` could express a side.
+
+**Fix.** `SeatQuery.side`, narrowing to A–C or D–F, derived from
+`CABIN_COLUMNS` like the position sets.
+
+### 3.7 "Random" cancelled the request
+
+**Symptom.** *"a random seat at the back of the plane"* shuffled the whole
+cabin and returned row 12. The seats were random, and nothing about them was at
+the back.
+
+**Two causes.** The prompt let the model drop the rows once it set `random`;
+and the ranking discarded `toward` whenever it shuffled.
+
+**Fix.** The prompt states that random never cancels a constraint, with worked
+examples carrying both. The draw is made from the named third of the cabin,
+falling back to the wider set rather than refusing.
+
+### 3.8 The model invents claims nobody made
+
+This is the pattern behind most of the rest, and the most useful thing on this
+page.
+
+| It invented | On a phrase like |
+|---|---|
+| `side: right` | "aisle seat at the back" |
+| `max_row: 10` | "random window seat on the left" |
+| `toward: front` | "window seats for 6 people" |
+| `position: middle` | "6 seats for a family in one row" |
+| `party: 6` | anything nearby that mentioned six |
+
+Asking it not to does not work. It was told explicitly to set a side only when
+asked, and given a counter-example — and **the counter-example made it worse**,
+because it ended in "at the back" and taught exactly the association it was
+meant to break.
+
+**So the fix is deterministic, not conversational: a claim is dropped unless
+the passenger's own words support it.**
 
 ```python
-def embed(text: str) -> list[float]        # nomic-embed-text, 768 dims
-def extract_json(prompt: str, schema: dict) -> dict   # qwen3:14b, format=schema
+_drop_unsaid_side(query, prose)      # left|port, right|starboard
+_drop_unsaid_band(query, prose)      # front|forward|nose…, back|rear|tail…
+_drop_unsaid_toward(query, prose)    # same word sets
+_drop_unsaid_party(query, prose)     # a digit, or one|two|…|couple|pair
+_drop_unsaid_position(query, prose)  # window|porthole|view|aisle|middle…
+_drop_unsaid_together(query, prose)  # together|one row|next to|family…
 ```
 
-Both take a hard timeout (5s) and raise `ProviderUnavailable` on anything —
-connection refused, timeout, malformed response. One narrow boundary, so
-swapping Ollama for a hosted API later touches one file.
+Two properties make this safe:
 
-### `extraction.py` — prose to a validated filter
+- **They only ever remove.** A guard that added a constraint could invent one
+  itself, and negation ("not at the back") would defeat it.
+- **They cover closed word sets.** Naming a side, a count, an end or a grouping
+  takes one of a handful of words. Explicit rows are never second-guessed —
+  "rows 5 to 9" is the passenger's, whatever surrounds it.
 
-`extract(prose)` calls `extract_json` with `SEAT_QUERY_JSON_SCHEMA` as
-`format=`, so decoding is constrained to the shape rather than parsed hopefully
-out of prose. Then `_validate()`:
+`position` is the awkward one: its synonyms are genuinely open-ended, which is
+why the vector vocabulary exists. Its guard is deliberately wide, and anything
+stranger than the list falls through to an empty query, which is exactly what
+sends it to the index.
 
-- drops fields the model invented
-- clamps `min_row`/`max_row` into `1..CABIN_ROWS`, and swaps them if reversed
-- rejects a `position` outside `window|aisle|middle`
-- upper-cases `destination`, and discards it if it is not three letters
+### 3.9 A group is one request, not N requests
 
-**Validation is not optional politeness.** A model that returns `max_row: 300`
-must not reach the ORM as a filter that silently matches everything.
+**Symptom.** *"6 seats for a family one row"* returned six middle seats
+scattered down the cabin.
 
-### `vocabulary.py` — the one legitimate use of an index
+**Cause.** Besides the invented position (§3.8), a filter matching six seats is
+not the same request as six seats *together*, and nothing expressed the
+difference.
 
-A small curated corpus of concept phrases, each mapping to a field and value:
-
-| Phrase | → |
-|---|---|
-| "by the porthole", "with a view" | `position=window` |
-| "up front", "near the cockpit" | `max_row=10` |
-| "near the loo", "at the back" | `min_row=25` |
-
-`reindex()` embeds each phrase and writes it to the `vec0` table.
-`resolve(phrase)` embeds the unknown phrase and returns the nearest concept
-above a similarity floor, or `None`.
-
-This corpus is **small, static and authored** — it changes when the vocabulary
-changes, never when someone books a seat. That is what makes an index
-appropriate here and inappropriate for the seats themselves.
-
-### Migration
-
-`assistant/migrations/0001_initial.py`:
-
-- a normal `Concept` model (phrase, field, value) — ordinary ORM
-- `migrations.RunSQL` creating the `vec0` virtual table, which has no Django
-  model mapped onto it and is read through raw SQL
-
-```sql
-CREATE VIRTUAL TABLE assistant_concept_vec USING vec0(
-    concept_id INTEGER PRIMARY KEY,
-    embedding  FLOAT[768]
-);
-```
-
-The dimension is baked in. **Changing the embedding model means dropping and
-rebuilding the table** — a migration, not a config edit.
-
-### `selectors.search_seats(flight, query: SeatQuery)`
-
-Turns the validated filter into seats, reusing `seat_map()`:
-
-- `position` → column sets derived from `CABIN_COLUMNS`, not stored flags:
-  window `{A,F}`, aisle `{C,D}`, middle `{B,E}`
-- `min_row`/`max_row` → row bounds
-- ranked by cabin order, capped at `MAX_PARTY_SIZE`
+**Fix.** `SeatQuery.together`. The search prefers a single row that can hold the
+whole party, skips a row with a seat already taken, and falls back rather than
+refusing when the filter makes one row impossible — as six window seats always
+will.
 
 ---
 
-## 5. Failure behaviour
+## 4. Failure behaviour
 
-Ollama is a separate process that may be stopped. **The three core
-requirements must never depend on it.**
+The three core requirements never depend on a model being up.
 
 | Condition | Response |
 |---|---|
-| Ollama unreachable or slow (>5s) | Map returns unchanged, banner: smart search unavailable |
-| Extraction returns nothing usable | Banner asking for a rephrase, map unchanged |
-| Valid query, no matching free seat | Banner saying so, map unchanged |
-| Valid query with matches | Seats pressed, camera flies to them |
+| Ollama unreachable or slow (>30s) | Map unchanged, existing selection intact, "smart search is unavailable" |
+| Nothing matches | Map unchanged, selection intact, "No free window seats up to row 1" |
+| A match | Seats selected, camera flies, banner names what was understood |
 
 Every path returns **200 with the map**, for the same reason booking failures
-do: htmx does not swap error responses.
+do: htmx does not swap error responses, so a 4xx would leave the passenger
+staring at an unchanged page.
+
+The banner always states the filter in English — *"Aisle seats on the right as
+far back as possible."* That is not decoration. It is the only way a passenger
+can tell a misunderstanding from an empty cabin.
 
 ---
 
-## 6. Work breakdown
+## 5. Testing
 
-| # | Step | Independently mergeable? |
+**No test requires Ollama.** The provider is one file precisely so the suite can
+mock that seam.
+
+Covered:
+
+- validation: absurd rows clamped, reversed ranges swapped, invented fields and
+  enum values dropped, `random` accepted only as a real boolean
+- every guard, including the word-boundary case — "alright" is not a request
+  for the right-hand aisle
+- search: position sets, side sets, row bounds, `toward` ordering, `together`
+  row preference and its fallback, seeded randomness, two queries per search
+- degradation: model down, map still renders, selection survives
+- injection: the database survives and still books
+
+**Not covered, and cannot be:** whether the model extracts a given phrase
+correctly. Asserting that would mean requiring Ollama in CI, which this plan
+rules out. Every phrase in §1 was checked by hand against the live model, and
+that is the honest status.
+
+If you change the prompt or the model, re-run those phrases. A quick way:
+
+```bash
+uv run ars/manage.py shell -c "
+from assistant import extraction
+from assistant.schema import describe
+for p in ['window seat near the front', 'farthest back window',
+          '6 seats for a family in one row', 'aisle on the right at the back']:
+    print(p, '->', describe(extraction.extract(p)))
+"
+```
+
+---
+
+## 6. Tuning knobs, and where they live
+
+| Knob | Where | Note |
 |---|---|---|
-| 1 | `providers.py` against the live Ollama, with timeouts | yes |
-| 2 | `extraction.py` + validation, provider mocked in tests | yes |
-| 3 | `Concept` model, `vec0` migration, `reindex` command | yes |
-| 4 | `vocabulary.py` resolve, over the seeded corpus | yes |
-| 5 | `selectors.search_seats` | yes |
-| 6 | `?q=` on the `seat-map` route + the header input | last |
-| 7 | ARCHITECTURE §7 corrections (models installed, status) | with 6 |
-
-Steps 1–5 are all testable without a browser. Step 6 is small precisely
-because the seat map already does the hard parts.
+| `GENERATION_MODEL` | `assistant/providers.py` | `qwen3:1.7b`. Bigger is slower, not obviously better — see §3.2 |
+| `EMBEDDING_MODEL` | `assistant/providers.py` | Changing it means a migration **and** re-measuring §3.3 |
+| `REQUEST_TIMEOUT_SECONDS` | `assistant/providers.py` | 30s, sized for a cold start, not a warm call |
+| `MAX_DISTANCE` | `assistant/vocabulary.py` | L2, not cosine |
+| `CONCEPTS` | `assistant/vocabulary.py` | Add a phrase when a real one fails, then `reindex_concepts` |
+| Prompt and guards | `assistant/extraction.py` | Row bands derive from `CABIN_ROWS` |
 
 ---
 
-## 7. Tests
+## 7. Known rough edges
 
-**No test may require Ollama to be running.** The provider is mocked at the
-`providers.py` boundary throughout, which is exactly why that boundary is one
-file.
-
-- **Extraction**: fixed prose → expected `SeatQuery`, with the model response
-  stubbed. Table-driven over the phrasings the corpus is meant to cover.
-- **Validation**: `max_row: 300` clamps; reversed bounds swap; invented fields
-  vanish; a bogus `position` is dropped rather than passed through.
-- **Vocabulary**: `resolve()` against a stubbed embedding returns the nearest
-  concept; a nonsense phrase below the floor returns `None`.
-- **Search**: seeded cabin, `SeatQuery(position='window', max_row=10)` returns
-  exactly the expected designations; query count fixed.
-- **Degradation**: provider raising `ProviderUnavailable` → the view still
-  returns the map, 200, with the unavailable banner. This is the test that
-  protects the core requirements.
-- **Injection**: prose like `"; DROP TABLE reservations_booking; --"` produces
-  either a harmless filter or nothing, and the table still exists afterwards.
-
-One **manual, non-CI** check against the live Ollama, recorded in the PR: a
-handful of real phrasings and what they extracted. Model behaviour is not
-something to assert in a test suite, but it is something to have looked at.
-
----
-
-## 8. Risks
-
-| Risk | Handling |
-|---|---|
-| A 14B model is slow enough to feel broken | 5s timeout, and the input says "smart search" so expectations are set; measure real latency in step 1 and reconsider the model if it is bad |
-| Constrained decoding still returns nonsense | Validation clamps rather than trusts; unusable results degrade to a rephrase prompt |
-| The vocabulary corpus is guesswork | It is authored and versioned; add phrases when a real one fails, and the reindex is one command |
-| sqlite-vec unavailable on a contributor's Python | Already handled: `apps.py` skips loading for non-SQLite, and README documents the interpreter requirement |
-| Scope creep into "chat with your booking" | Out of scope, explicitly. This maps a phrase onto a filter and stops |
-
----
-
-## 9. Open questions
-
-1. **Does this feature belong in the deliverable at all?** All three core
-   requirements will be met without it. It is the most interesting part of the
-   architecture and the least required. Proposal: build it after
-   [07-print-flight](07-print-flight.md), and only if there is appetite.
-2. **Should a search pre-select the matches, or only highlight them?**
-   Pre-selecting reuses everything already built. Highlighting needs new state
-   and new CSS. Proposal: pre-select, capped at the party size.
-3. **Flight-level phrasing** — `SeatQuery` carries `flight_number` and
-   `destination`, which imply searching *across* flights from the flight list,
-   not only within one cabin. Proposal: keep this release inside one flight,
-   and leave those two fields unused rather than removing them.
+- **An invented position survives.** *"seats for six"* comes back as window
+  seats. The guard's word list cannot be tightened without breaking the open
+  phrasing the vocabulary exists for. Revisit by consulting the index before
+  dropping, if it grates.
+- **Searching is within one flight.** `SeatQuery` carries `flight_number` and
+  `destination` for a future search across flights; they are unused.
+- **The vocabulary is ten phrases.** It earns its place as a fallback, but the
+  model now handles most of what it covers.
+- **First query after an idle period is slower** — Ollama reloads the model.

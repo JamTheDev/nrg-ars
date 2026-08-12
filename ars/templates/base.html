@@ -1,10 +1,10 @@
-{% load django_htmx static %}<!doctype html>
+{% load django_htmx static assets %}<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}ars{% endblock %}</title>
-  <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
+  <link rel="stylesheet" href="{% versioned_static 'css/tailwind.css' %}">
   {% htmx_script %}
   {% block head %}{% endblock %}
 </head>

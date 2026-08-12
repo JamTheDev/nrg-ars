@@ -75,7 +75,99 @@ uv run ars/manage.py print_flight PR101
 uv run ars/manage.py print_flight PR101 --available-only | wc -l
 ```
 
-### 7. Start the server
+### 7. Natural-language search (optional)
+
+The seat map's chat button turns the reserve bar into a search box: type
+*"window seats for 6 people"* and six window seats are selected for you.
+
+**The app runs fine without any of this.** With no Ollama the box says smart
+search is unavailable and everything else — browsing, picking, booking, first
+available, `print_flight` — carries on. Skip to step 8 if you do not want it.
+
+#### 7a. Install and start Ollama
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh   # Linux; macOS: brew install ollama
+ollama serve                                     # a service on most installs
+```
+
+Check it is up before going further:
+
+```bash
+curl -s http://localhost:11434/api/tags | head -c 80
+```
+
+#### 7b. Pull the two models
+
+```bash
+ollama pull qwen3:1.7b          # ~1.4 GB, turns prose into a filter
+ollama pull nomic-embed-text    # ~275 MB, embeds the vocabulary
+ollama list                     # both should appear
+```
+
+Both are chosen deliberately. `qwen3:1.7b` answers in about a second where
+`qwen3:14b` takes six or seven, which reads as broken at a kiosk — and it is
+just as accurate once the JSON schema does its share of the work
+([why](docs/plans/08-natural-language-search.md#32-the-model-was-not-the-problem-the-schema-was)).
+`nomic-embed-text` produces 768-dimension vectors, which is baked into the
+`vec0` table; a different embedding model means a new migration.
+
+Nothing leaves the machine. Passenger phrasing can contain personal detail, and
+a local model means it stays local.
+
+#### 7c. Build the vocabulary index
+
+```bash
+uv run ars/manage.py migrate            # creates the vec0 virtual table
+uv run ars/manage.py reindex_concepts   # embeds the ten curated phrases
+```
+
+Expect `10 concepts indexed.` Re-run it after editing `CONCEPTS` in
+`ars/assistant/vocabulary.py`, or after changing the embedding model.
+
+#### 7d. Check it end to end, without a browser
+
+```bash
+uv run ars/manage.py shell -c "
+from assistant import extraction
+from assistant.schema import describe
+for p in ['window seat near the front', 'farthest back aisle on the right',
+          '6 seats for a family in one row']:
+    print(f'{p!r:40} -> {describe(extraction.extract(p))}')
+"
+```
+
+```
+'window seat near the front'             -> window seats up to row 10
+'farthest back aisle on the right'       -> aisle seats on the right as far back as possible
+'6 seats for a family in one row'        -> seats for 6 passengers together
+```
+
+Wording varies slightly between runs — that is a language model, not a parser.
+What matters is that each phrase produces a filter that means what you asked
+for.
+
+**Timing.** The first call after a cold start takes around **9 seconds** while
+Ollama loads the model; every call after that is **1–2 seconds**. The model is
+kept resident for 30 minutes, so only the first query pays. The request timeout
+is 30 seconds — sized for that cold start, not for a warm call.
+
+#### 7e. When it does not work
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| "Smart search is unavailable" | Ollama not running, or a model not pulled | `ollama list`, then 7a–7b |
+| Every query takes 6–7s | A larger model is configured | Check `GENERATION_MODEL` in `ars/assistant/providers.py` |
+| First query ~9s, rest 1–2s | Ollama was loading the model | Normal. It stays resident for 30 minutes |
+| `reindex_concepts` fails | Ollama unreachable | Same as row one |
+| `no such table: assistant_concept_vec` | Migration not run | `uv run ars/manage.py migrate` |
+| `enable_load_extension` errors | Python built without SQLite extension support | Use a `uv`-managed or Homebrew Python, not the macOS system one |
+| Search understands the wrong thing | Model or prompt behaviour | The problem log and re-check command are in [docs/plans/08](docs/plans/08-natural-language-search.md) |
+
+Ollama on another machine? Set `OLLAMA_HOST` in `.env`
+(for example `http://192.168.1.20:11434`).
+
+### 8. Start the server
 
 ```bash
 uv run ars/manage.py runserver

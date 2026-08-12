@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Literal
@@ -291,6 +292,92 @@ def pick_party_seats(
 
     ordered = _cabin_order(chosen)
     return PartyPick(seats=[cell.seat for cell in ordered], tier=_classify(ordered))
+
+
+def position_columns(position: str) -> set[str]:
+    """Which columns count as window, aisle or middle.
+
+    Computed from CABIN_COLUMNS so a layout change cannot leave a stored flag
+    stale -- see ARCHITECTURE.md section 7.
+    """
+    columns = settings.CABIN_COLUMNS
+    split = aisle_index()
+    window = {columns[0], columns[-1]}
+    aisle = {columns[split - 1], columns[split]}
+    return {
+        'window': window,
+        'aisle': aisle,
+        'middle': set(columns) - window - aisle,
+    }[position]
+
+
+def side_columns(side: str) -> set[str]:
+    """Which columns are on the left or the right of the aisle.
+
+    Facing forward: A-C on the left, D-F on the right. Derived from the layout
+    for the same reason the position sets are.
+    """
+    columns = settings.CABIN_COLUMNS
+    split = aisle_index()
+    return {'left': set(columns[:split]), 'right': set(columns[split:])}[side]
+
+
+def search_seats(
+    flight: Flight, query, limit: int | None = None, rng: random.Random | None = None
+) -> list[Seat]:
+    """Free seats on `flight` matching a validated SeatQuery, in cabin order.
+
+    The filter arrives already clamped by the assistant; this only applies it.
+    Two queries, via seat_map().
+    """
+    cabin = seat_map(flight)
+    columns = position_columns(query.position) if query.position else None
+    side = side_columns(query.side) if query.side else None
+
+    matches = [
+        cell
+        for row in cabin.rows
+        for cell in row.cells
+        if not cell.is_taken
+        and (columns is None or cell.seat.column in columns)
+        and (side is None or cell.seat.column in side)
+        and (query.min_row is None or cell.seat.row >= query.min_row)
+        and (query.max_row is None or cell.seat.row <= query.max_row)
+    ]
+
+    # A group asked to sit together is asked for one thing, not `limit` things
+    # that each satisfy the filter. Prefer a single row that can hold them all;
+    # if none can, fall through and offer the closest the filter allows.
+    if query.together and limit and limit > 1:
+        by_row: dict[int, list[SeatCell]] = {}
+        for cell in matches:
+            by_row.setdefault(cell.seat.row, []).append(cell)
+        for number in sorted(by_row):
+            if len(by_row[number]) >= limit:
+                return [cell.seat for cell in by_row[number][:limit]]
+
+    # Bounds say which seats qualify; these say which of them to offer first.
+    if query.is_random:
+        # "a random seat at the back" is a random seat *at the back*. Shuffling
+        # the whole cabin answers only half the sentence, so when an end is
+        # named the draw is made from that third of it.
+        if query.toward:
+            third = max(1, settings.CABIN_ROWS // 3)
+            if query.toward == 'back':
+                in_band = [c for c in matches if c.seat.row > settings.CABIN_ROWS - third]
+            else:
+                in_band = [c for c in matches if c.seat.row <= third]
+            # Fall back to the wider set rather than refusing: a full rear
+            # third still means "somewhere at the back" to the passenger.
+            matches = in_band or matches
+        (rng or random.Random()).shuffle(matches)
+    elif query.toward == 'back':
+        # Without this, "as far back as possible" returns the front-most seat
+        # of the back section -- filter right, answer backwards.
+        matches.sort(key=lambda cell: (-cell.seat.row, cell.seat.column))
+
+    seats = [cell.seat for cell in matches]
+    return seats[:limit] if limit else seats
 
 
 def _pick_fresh(cabin: Cabin, free: Sequence[SeatCell], size: int) -> list[SeatCell]:
