@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from io import StringIO
+from zoneinfo import ZoneInfo
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -26,7 +27,8 @@ class PrintFlightTests(TestCase):
             number='PR101',
             origin='MNL',
             destination='CEB',
-            departs_at=datetime(2026, 8, 14, 9, 30, tzinfo=UTC),
+            # The command prints local time (TIME_ZONE), so build the fixture in it.
+            departs_at=datetime(2026, 8, 14, 9, 30, tzinfo=ZoneInfo('Asia/Manila')),
         )
 
     def book(self, *designations: str) -> None:
