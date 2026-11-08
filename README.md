@@ -24,6 +24,20 @@ It also ships an **AI assistant** that answers questions about a flight
 | How each feature was built, and what went wrong | [docs/plans/](docs/plans/) |
 | Contribution rules, enforced by hooks | [CLAUDE.md](CLAUDE.md) |
 
+### How it was built
+
+Built with Claude Code, working under written rules rather than ad-hoc prompts.
+The rules live in [CLAUDE.md](CLAUDE.md), and hooks in
+[.claude/hooks/](.claude/hooks/) enforce them in code: no pushes to `main`, no AI
+trailers in commits or PR text, and `ruff` after every edit. Each feature has an
+as-built write-up in [docs/plans/](docs/plans/), including the traps found along
+the way. The assistant's problem log
+([08](docs/plans/08-natural-language-search.md)) is the best example.
+
+Checks: 164 tests (about two seconds), and `ruff` must pass before any PR. The
+assistant is optional and runs on a local model, so passenger text never leaves
+the machine.
+
 ---
 
 ## Quick start
